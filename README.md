@@ -10,7 +10,7 @@ The application aims to provide a simple, user-friendly interface with understan
 
 **In Development — Stage 1: Application Foundation**
 
-The initial Kivy application has been created and successfully tested on Windows. Core business features are currently under development.
+The Kivy application opens with the GrillFlow splash screen and a minimal Owner Login placeholder. Core business features are currently under development.
 
 ## Technologies
 
@@ -136,6 +136,8 @@ Run the application:
 ```bash
 python main.py
 ```
+
+The splash screen uses the official images in `assets/images/`. **Get Started** opens the Owner Login placeholder; its **Back** button returns to the splash screen. The desktop preview opens at 400 × 750 pixels.
 
 **Note:** The current version is a Windows-tested Kivy prototype. Android APK packaging has not yet been completed.
 
