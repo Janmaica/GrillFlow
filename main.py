@@ -3,7 +3,8 @@ from kivy.core.window import Window
 from kivy.uix.screenmanager import ScreenManager
 from kivy.utils import platform
 
-from screens.splash_screen import LoginScreen, SplashScreen
+from screens.login_screen import LoginScreen
+from screens.splash_screen import SplashScreen
 
 
 class GrillFlowApp(App):
