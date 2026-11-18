@@ -3,6 +3,7 @@ from kivy.core.window import Window
 from kivy.uix.screenmanager import ScreenManager
 from kivy.utils import platform
 
+from screens.dashboard_screen import DashboardScreen
 from screens.login_screen import LoginScreen
 from screens.splash_screen import SplashScreen
 
@@ -13,6 +14,7 @@ class GrillFlowApp(App):
         manager = ScreenManager()
         manager.add_widget(SplashScreen(name="splash"))
         manager.add_widget(LoginScreen(name="login"))
+        manager.add_widget(DashboardScreen(name="dashboard"))
         return manager
 
 

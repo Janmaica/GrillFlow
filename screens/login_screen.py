@@ -408,7 +408,7 @@ class LoginScreen(Screen):
             size_hint_y=None,
             height=dp(48),
         )
-        login_button.bind(on_release=self._validate_login)
+        login_button.bind(on_release=self._show_dashboard)
         self.login_button = login_button
 
         fingerprint = _FingerprintButton()
@@ -532,19 +532,10 @@ class LoginScreen(Screen):
         self.status.text = message
         self.status.height = dp(34) if message else 0
 
-    def _validate_login(self, *_):
-        username = self.username_input.text.strip()
-        pin = self.pin_input.text
-        if not username and not pin:
-            self._set_status("Please enter your username and PIN.")
-        elif not username:
-            self._set_status("Please enter your username.")
-        elif not pin:
-            self._set_status("Please enter your PIN.")
-        else:
-            self._set_status(
-                "Secure owner authentication is not available yet."
-            )
+    def _show_dashboard(self, *_):
+        # TODO: Replace this temporary development bypass with secure owner
+        # authentication before production release.
+        self.manager.current = "dashboard"
 
     def _show_fingerprint_message(self, *_):
         self._set_status("Fingerprint sign-in is Coming Soon.")
