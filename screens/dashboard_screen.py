@@ -5,6 +5,7 @@ from kivy.core.text import Label as CoreLabel
 from kivy.graphics import Color, Ellipse, Line, Rectangle, RoundedRectangle
 from kivy.graphics.texture import Texture
 from kivy.metrics import dp, sp
+from kivy.properties import NumericProperty
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
@@ -31,25 +32,51 @@ GREEN = (0.03, 0.40, 0.05, 1)
 
 # Sample values and hourly totals for the UI preview. No business records are read.
 SAMPLE_METRICS = (
-    ("Total Sales", 3000, "cart",
-     "Kinatibuk-ang kantidad sa imong gibaligya, apil ang giutang.",
-     "Kung nakabaligya ka og 60 ka stick sa ₱50 matag usa, ₱3,000 ang halin."),
-    ("Cash Collected", 2500, "wallet",
-     "Kuwarta nga nadawat na nimo gikan sa mga bayad sa customer.",
-     "Kung ₱3,000 ang halin ug ₱500 ang giutang, ₱2,500 ang imong nadawat."),
-    ("Unpaid Credit", 500, "bill",
-     "Kantidad nga utang pa sa mga customer.",
-     "Kung giutang ang 10 ka stick sa ₱50 matag usa, ₱500 pa ang bayran."),
-    ("Expenses", 400, "receipt",
-     "Kuwarta nga gigasto para sa negosyo.",
-     "Kung ₱300 ang karne ug ₱100 ang uling, ₱400 ang gasto."),
-    ("Net Profit", 1400, "trend",
-     "Kita nga nahibilin human ibawas sa halin ang tanang gasto sa negosyo.",
-     "Kung ₱3,000 ang halin ug ₱1,600 ang tanang gasto, ₱1,400 ang kita."),
-    ("Available Cash", 2100, "bars",
-     "Kuwarta nga naa pa sa imong kaha ug magamit karon.",
-     "Kung ₱2,500 ang nadawat ug ₱400 ang gibayad gikan sa kaha, ₱2,100 ang nahibilin."),
+    ("Total Sales", 3000, "cart"),
+    ("Cash Collected", 2500, "wallet"),
+    ("Unpaid Credit", 500, "bill"),
+    ("Expenses", 400, "receipt"),
+    ("Net Profit", 1400, "trend"),
+    ("Available Cash", 2100, "bars"),
 )
+
+# Examples illustrate each metric independently of the dashboard card values.
+METRIC_DETAILS = {
+    "Total Sales": (
+        "Kinatibuk-ang Halin",
+        "Ang total nga kantidad sa tanang nahalin nga produkto, apil ang nabayran ug wala pa mabayri.",
+        "Cash Sales ₱2,500 + Unpaid Sales ₱500 = Total Sales ₱3,000.",
+    ),
+    "Cash Collected": (
+        "Kwarta nga Nadawat",
+        "Ang aktuwal nga kwarta nga nadawat sa negosyo gikan sa mga bayad sa customers.",
+        "Total Sales ₱3,000 - Unpaid Credit ₱500 = Cash Collected ₱2,500.",
+    ),
+    "Unpaid Credit": (
+        "Utang nga Wala Pa Mabayri",
+        "Ang kantidad sa halin nga wala pa mabayri sa mga customers.",
+        "Total Sales ₱3,000 - Cash Collected ₱2,500 = Unpaid Credit ₱500.",
+    ),
+    "Expenses": (
+        "Mga Gasto sa Negosyo",
+        "Ang kwarta nga gigasto sa negosyo sama sa karne, uling, panakot, ug uban pang kinahanglanon.",
+        "Ingredients ₱1,200 + Other Expenses ₱400 = Total Expenses ₱1,600.",
+    ),
+    "Net Profit": (
+        "Pinal nga Kita sa Negosyo",
+        "Ang tinuod nga kita sa negosyo human ibawas ang tanang gasto (puhunan ug ubang expenses).",
+        (
+            ("Total Sales (Halin)", "₱3,000"),
+            ("Total Expenses (Gastos)", "₱1,600"),
+            ("Net Profit", "₱1,400"),
+        ),
+    ),
+    "Available Cash": (
+        "Kwarta nga Magamit Karon",
+        "Ang nahibiling kwarta human ibawas ang nabayrang mga gasto gikan sa nadawat nga cash.",
+        "Cash Collected ₱2,500 - Cash Expenses ₱400 = Available Cash ₱2,100.",
+    ),
+}
 SAMPLE_SALES = (
     ("8AM", 900), ("10AM", 1500), ("12PM", 1050), ("2PM", 1450),
     ("4PM", 1950), ("6PM", 2500), ("8PM", 3000),
@@ -83,6 +110,17 @@ ICON_PATHS = {
                .71,.14,.53,.07,.34,.12,.17,.29,.14,.48,.29,.70,.30,.52,
                .42,.63,.50,.80,.49,.97),),
     "info": ((.50,.25,.50,.55),),
+    "back": ((.88,.50,.13,.50,.45,.82), (.13,.50,.45,.18)),
+    "search": ((.63,.37,.90,.10),),
+    "plus": ((.20,.50,.80,.50), (.50,.20,.50,.80)),
+    "camera": ((.08,.22,.92,.22,.92,.73,.68,.73,.61,.85,.39,.85,.32,.73,.08,.73,.08,.22),),
+    "edit": ((.15,.15,.22,.41,.70,.89,.89,.70,.41,.22,.15,.15),
+             (.60,.79,.79,.60)),
+    "delete": ((.19,.76,.81,.76), (.38,.76,.38,.87,.62,.87,.62,.76),
+               (.26,.70,.31,.16,.69,.16,.74,.70), (.43,.61,.43,.30), (.57,.61,.57,.30)),
+    "chevron": ((.34,.80,.66,.50,.34,.20),),
+    "person": ((.50,.48,.35,.55,.30,.69,.36,.83,.50,.89,.64,.83,.70,.69,.65,.55,.50,.48),
+               (.13,.15,.17,.28,.30,.38,.70,.38,.83,.28,.87,.15)),
 }
 
 
@@ -123,6 +161,10 @@ class Icon(Widget):
                 self._dot(x, y, side, .75, .10)
             elif self.name == "bill":
                 Line(circle=(self.center_x, self.center_y, side * .14), width=dp(1))
+            elif self.name == "search":
+                Line(circle=(x + side * .43, y + side * .57, side * .29), width=dp(1.2))
+            elif self.name == "camera":
+                Line(circle=(self.center_x, y + side * .48, side * .16), width=dp(1.2))
 
     @staticmethod
     def _dot(x, y, side, cx, cy):
@@ -158,10 +200,28 @@ def paint_surface(widget, fill, radius=0, border=None, top_only=False):
     update()
 
 
+def paint_header_gradient(header, radius=0):
+    gradient = Texture.create(size=(2, 1), colorfmt="rgb")
+    gradient.blit_buffer(bytes((222, 79, 0, 255, 126, 0)), colorfmt="rgb", bufferfmt="ubyte")
+    gradient.mag_filter = "linear"
+    with header.canvas.before:
+        Color(*WHITE)
+        if radius:
+            background = RoundedRectangle(texture=gradient, radius=[dp(radius)])
+        else:
+            background = Rectangle(texture=gradient)
+
+    def update(*_):
+        background.pos, background.size = header.pos, header.size
+
+    header.bind(pos=update, size=update)
+    update()
+
+
 class MetricCard(FloatLayout):
     def __init__(self, metric, show_info, **kwargs):
         super().__init__(**kwargs)
-        title, amount, icon, _, _ = metric
+        title, amount, icon = metric
         profit = title == "Net Profit"
         fill = (0.92, 0.99, 0.87, 1) if profit else WHITE
         edge = (0.78, 0.89, 0.71, 1) if profit else BORDER
@@ -239,15 +299,51 @@ class NavigationTab(ButtonBehavior, BoxLayout):
                               size_hint_y=None, height=dp(17)))
 
 
+def build_navigation(screen, active, show_message):
+    navigation = BoxLayout(size_hint_y=None, height=dp(58))
+    paint_surface(navigation, WHITE, border=BORDER)
+    tabs = {}
+    routes = {"Home": "dashboard", "Sales": "sales", "Products": "products"}
+
+    def select(_, name):
+        if name in routes:
+            screen.manager.current = routes[name]
+        else:
+            show_message(name, "Coming Soon")
+
+    for name, icon in (
+        ("Home", "home"), ("Sales", "cart"), ("Products", "box"),
+        ("Utang", "credit"), ("Reports", "trend"),
+    ):
+        tab = NavigationTab(name, icon, active=name == active)
+        if name != active:
+            tab.bind(on_release=lambda button, name=name: select(button, name))
+        tabs[name] = tab
+        navigation.add_widget(tab)
+    return navigation, tabs
+
+
+def wrapping_label(text, size, color=INK, *, bold=False, align="left"):
+    widget = Label(
+        text=text, size_hint_y=None, color=color, font_size=sp(size),
+        bold=bold, halign=align,
+    )
+    widget.bind(width=lambda instance, width: setattr(instance, "text_size", (width, None)))
+    widget.bind(texture_size=lambda instance, size: setattr(instance, "height", size[1]))
+    return widget
+
+
 class BottomSheet(FloatLayout):
-    def __init__(self, title, message, example=None, **kwargs):
+    reveal = NumericProperty(0)
+
+    def __init__(self, title, message, *, confirmation="Close", **kwargs):
         super().__init__(**kwargs)
-        backdrop = Button(
+        self.backdrop = Button(
             background_normal="", background_down="",
-            background_color=(0, 0, 0, .55),
+            background_color=(0, 0, 0, .55), pos_hint={"x": 0, "y": 0},
         )
-        backdrop.bind(on_release=self.dismiss)
-        self.add_widget(backdrop)
+        self.backdrop.bind(on_release=self.dismiss)
+        self.add_widget(self.backdrop)
 
         self.panel = BoxLayout(
             orientation="vertical", size_hint=(1, None),
@@ -256,49 +352,114 @@ class BottomSheet(FloatLayout):
         paint_surface(self.panel, WHITE, radius=24, top_only=True)
 
         scroll = ScrollView(do_scroll_x=False, bar_width=dp(2))
-        copy = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(10))
-        copy.bind(minimum_height=self._fit_panel)
-        copy.bind(minimum_height=copy.setter("height"))
-        paragraphs = [
-            (title, 22, AMOUNT, True),
-            (message, 16, INK, False),
-        ]
-        if example:
-            paragraphs.append(("Pananglitan: " + example, 15, AMOUNT, False))
-        for text, size, color, bold in paragraphs:
-            paragraph = Label(
-                text=text, size_hint_y=None, color=color, font_size=sp(size),
-                bold=bold, halign="left", valign="top",
-            )
-            paragraph.bind(width=lambda widget, width: setattr(widget, "text_size", (width, None)))
-            paragraph.bind(texture_size=lambda widget, size: setattr(widget, "height", size[1]))
-            copy.add_widget(paragraph)
-        scroll.add_widget(copy)
+        self.copy = BoxLayout(orientation="vertical", size_hint_y=None, spacing=dp(10))
+        self.copy.bind(minimum_height=self.copy.setter("height"))
+        self.copy.bind(minimum_height=self._fit_panel)
+        if title:
+            self.copy.add_widget(wrapping_label(title, 22, AMOUNT, bold=True))
+        if message:
+            self.copy.add_widget(wrapping_label(message, 16))
+        scroll.add_widget(self.copy)
         self.panel.add_widget(scroll)
-        close = _RoundedButton(text="Close", size_hint_y=None, height=dp(47))
-        close.bind(on_release=self.dismiss)
-        self.panel.add_widget(close)
+        self.confirm_button = _RoundedButton(text=confirmation, size_hint_y=None, height=dp(47))
+        self.confirm_button.bind(on_release=self.dismiss)
+        self.panel.add_widget(self.confirm_button)
         self.add_widget(self.panel)
-        self.copy = copy
-        self.bind(pos=self._place_panel, size=self._fit_panel)
+        self.bind(pos=self._place_panel, size=self._fit_panel, reveal=self._place_panel)
 
     def _fit_panel(self, *_):
-        self.panel.height = min(self.height, self.copy.minimum_height + dp(101))
+        _, top, _, bottom = self.panel.padding
+        reserved = top + bottom + self.confirm_button.height
+        reserved += self.panel.spacing * (len(self.panel.children) - 1)
+        if hasattr(self, "handle_row"):
+            reserved += self.handle_row.height
+        self.panel.height = min(max(0, self.height - dp(12)), self.copy.minimum_height + reserved)
         self._place_panel()
 
     def _place_panel(self, *_):
-        self.panel.pos = (self.x, self.y)
+        self.panel.pos = (self.x, self.y - self.panel.height * (1 - self.reveal))
 
     def on_parent(self, _, parent):
         if parent:
             self._fit_panel()
-            # Animate from the lower edge without moving the scrim.
-            self.panel.y = self.y - self.panel.height
-            Animation(y=self.y, duration=.20, t="out_quad").start(self.panel)
+            Animation(reveal=1, duration=.24, t="out_cubic").start(self)
+
+    def on_touch_down(self, touch):
+        if self.panel.collide_point(*touch.pos):
+            self.panel.on_touch_down(touch)
+        elif not touch.is_mouse_scrolling:
+            self.backdrop.on_touch_down(touch)
+        return True
+
+    def on_touch_move(self, touch):
+        super().on_touch_move(touch)
+        return True
+
+    def on_touch_up(self, touch):
+        super().on_touch_up(touch)
+        return True
 
     def dismiss(self, *_):
         if self.parent:
+            Animation.cancel_all(self, "reveal")
             self.parent.remove_widget(self)
+
+
+class FinancialInfoBottomSheet(BottomSheet):
+    def __init__(self, title, icon, subtitle, explanation, example, **kwargs):
+        super().__init__(None, None, confirmation="Nasabtan na nako", **kwargs)
+        self.panel.padding = (dp(20), dp(10), dp(20), dp(20))
+        self.handle_row = AnchorLayout(size_hint_y=None, height=dp(8))
+        handle = Widget(size_hint=(None, None), size=(dp(42), dp(4)))
+        paint_surface(handle, (0.72, 0.70, 0.70, 1), radius=2)
+        self.handle_row.add_widget(handle)
+        self.panel.add_widget(self.handle_row, index=len(self.panel.children))
+
+        heading = BoxLayout(size_hint_y=None, height=dp(55), spacing=dp(12))
+        icon_holder = AnchorLayout(size_hint_x=None, width=dp(54))
+        circle = AnchorLayout(size_hint=(None, None), size=(dp(50), dp(50)))
+        paint_surface(circle, (1, .91, .78, 1), radius=25)
+        circle.add_widget(Icon(icon, ORANGE, size_hint=(None, None), size=(dp(26), dp(26))))
+        icon_holder.add_widget(circle)
+        heading.add_widget(icon_holder)
+        heading.add_widget(label(title, 23, INK, bold=True))
+        self.copy.add_widget(heading)
+
+        badge = BoxLayout(size_hint_y=None, padding=(dp(10), dp(6)))
+        paint_surface(badge, (1, .89, .75, 1), radius=10)
+        badge.bind(minimum_height=badge.setter("height"))
+        badge.add_widget(wrapping_label(subtitle, 15, AMOUNT, bold=True, align="center"))
+        self.copy.add_widget(badge)
+        self.copy.add_widget(wrapping_label(explanation, 16))
+        self.copy.add_widget(self._example_box(example))
+
+    @staticmethod
+    def _example_box(example):
+        box = BoxLayout(
+            orientation="vertical", size_hint_y=None, spacing=dp(4),
+            padding=(dp(12), dp(10)),
+        )
+        paint_surface(box, (1, .92, .80, 1), radius=13)
+        box.bind(minimum_height=box.setter("height"))
+        box.add_widget(wrapping_label("Pananglitan:", 16, AMOUNT, bold=True))
+        if isinstance(example, str):
+            box.add_widget(wrapping_label(example, 14))
+            return box
+
+        for index, (caption, amount) in enumerate(example):
+            total = index == len(example) - 1
+            if total:
+                divider = Widget(size_hint_y=None, height=dp(1))
+                paint_surface(divider, (.91, .76, .59, 1))
+                box.add_widget(divider)
+            row = BoxLayout(size_hint_y=None, height=dp(21))
+            row.add_widget(label(caption, 14, bold=total))
+            row.add_widget(label(
+                amount, 16 if total else 14, AMOUNT if total else INK,
+                bold=total, align="right", size_hint_x=.34,
+            ))
+            box.add_widget(row)
+        return box
 
 
 class DashboardScreen(Screen):
@@ -344,7 +505,8 @@ class DashboardScreen(Screen):
 
         content_scroll.add_widget(self.content)
         shell.add_widget(content_scroll)
-        shell.add_widget(self._build_navigation())
+        navigation, self.tabs = build_navigation(self, "Home", self._show_sheet)
+        shell.add_widget(navigation)
         self.add_widget(shell)
         content_scroll.bind(height=self._resize_content)
         self._resize_content(content_scroll, content_scroll.height)
@@ -352,17 +514,7 @@ class DashboardScreen(Screen):
     def _build_header(self):
         header = BoxLayout(size_hint_y=None, height=dp(57), spacing=dp(7),
                            padding=(dp(12), 0, dp(8), 0))
-        gradient = Texture.create(size=(2, 1), colorfmt="rgb")
-        gradient.blit_buffer(bytes((222, 79, 0, 255, 126, 0)), colorfmt="rgb", bufferfmt="ubyte")
-        gradient.mag_filter = "linear"
-        with header.canvas.before:
-            Color(*WHITE)
-            background = Rectangle(texture=gradient)
-        def update(*_):
-            background.pos, background.size = header.pos, header.size
-
-        header.bind(pos=update, size=update)
-        update()
+        paint_header_gradient(header)
 
         emblem = AnchorLayout(size_hint_x=None, width=dp(25))
         emblem.add_widget(Icon("flame", WHITE, size_hint=(None, None), size=(dp(24), dp(27))))
@@ -372,21 +524,6 @@ class DashboardScreen(Screen):
         self.bell_button.bind(on_release=lambda *_: self._show_sheet("Notifications", "Coming Soon"))
         header.add_widget(self.bell_button)
         return header
-
-    def _build_navigation(self):
-        navigation = BoxLayout(size_hint_y=None, height=dp(58))
-        paint_surface(navigation, WHITE, border=BORDER)
-        self.tabs = {}
-        for name, icon in (
-            ("Home", "home"), ("Sales", "cart"), ("Products", "box"),
-            ("Utang", "credit"), ("Reports", "trend"),
-        ):
-            tab = NavigationTab(name, icon, active=name == "Home")
-            if name != "Home":
-                tab.bind(on_release=lambda _, title=name: self._show_sheet(title, "Coming Soon"))
-            self.tabs[name] = tab
-            navigation.add_widget(tab)
-        return navigation
 
     def _resize_content(self, _, height):
         self.metrics.row_default_height = max(dp(86), min(dp(132), height * .19))
@@ -412,11 +549,14 @@ class DashboardScreen(Screen):
         menu.open(button)
 
     def _show_metric(self, metric):
-        title, _, _, meaning, example = metric
-        self._show_sheet(title, meaning, example)
+        title, _, icon = metric
+        self._open_sheet(FinancialInfoBottomSheet(title, icon, *METRIC_DETAILS[title]))
 
-    def _show_sheet(self, title, message, example=None):
+    def _show_sheet(self, title, message):
+        self._open_sheet(BottomSheet(title, message))
+
+    def _open_sheet(self, sheet):
         if self.sheet and self.sheet.parent:
             self.sheet.dismiss()
-        self.sheet = BottomSheet(title, message, example)
-        self.add_widget(self.sheet)
+        self.sheet = sheet
+        self.add_widget(sheet)
