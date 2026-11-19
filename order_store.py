@@ -3,7 +3,10 @@ import sqlite3
 from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
+from pathlib import Path
 
+from consumption_store import ConsumptionStore
+from expense_store import ExpenseStore
 from product_store import MAX_SQLITE_INTEGER, normalized_name
 from receipt_data import PHILIPPINE_TIME, Receipt, ReceiptItem, ReceiptPayment
 
@@ -14,9 +17,14 @@ CREDIT = "Unpaid"
 IMMEDIATE = "immediate"
 PAY_LATER = "pay_later"
 CREDIT_ARRANGEMENT = "credit"
+RESET_TABLES = (
+    "order_arrangement_transfers", "payments", "order_items", "family_consumption", "orders", "products",
+    "expense_corrections", "expenses",
+)
 HISTORY_BALANCE_MESSAGE = (
     "Some orders still have unpaid balances. Please settle all outstanding payments before clearing this history."
 )
+ORDER_BALANCE_MESSAGE = "This order has an outstanding balance and cannot be deleted until it is fully paid."
 HISTORY_PERIODS = ("Today", "This Week")
 
 
@@ -74,6 +82,12 @@ class Payment:
 class SavedOrder:
     id: int
     order_number: str
+
+
+@dataclass(frozen=True)
+class ResetResult:
+    backup_path: Path
+    photo_cleanup_failed: bool
 
 
 class OutstandingBalanceError(ValueError):
@@ -134,6 +148,47 @@ def allocate_payment(status, total, tendered, customer, *, arrangement=None):
 class OrderStore:
     def __init__(self, product_store):
         self.products = product_store
+
+    def reset_all_data(self):
+        with closing(self.products.connect()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            backup_path = self._backup_before_reset()
+            photo_paths = [row[0] for row in connection.execute("""
+                SELECT DISTINCT image_path FROM products WHERE image_path IS NOT NULL
+            """)]
+            for table in RESET_TABLES:
+                connection.execute(f"DELETE FROM {table}")
+            for table in RESET_TABLES:
+                if connection.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone():
+                    raise sqlite3.IntegrityError(f"Reset did not clear {table}.")
+            if connection.execute("PRAGMA foreign_key_check").fetchone():
+                raise sqlite3.IntegrityError("Reset did not pass SQLite foreign-key validation.")
+        try:
+            photo_cleanup_failed = bool(self.products.remove_unreferenced_photos(photo_paths))
+        except (OSError, sqlite3.Error):
+            photo_cleanup_failed = True
+        return ResetResult(backup_path, photo_cleanup_failed)
+
+    def _backup_before_reset(self):
+        return self._backup_database("reset")
+
+    def _backup_database(self, purpose):
+        folder = self.products.data_dir / "backups"
+        folder.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        path = folder / f"grillflow-before-{purpose}-{timestamp}.sqlite3"
+        path.touch(exist_ok=False)
+        try:
+            # A separate read connection can back up while the write transaction
+            # holds the write reservation and blocks other writers.
+            with closing(self.products.connect()) as source, closing(sqlite3.connect(path)) as target:
+                source.backup(target)
+                if target.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
+                    raise sqlite3.IntegrityError("The local backup could not be verified.")
+        except (OSError, sqlite3.Error):
+            path.unlink(missing_ok=True)
+            raise
+        return path
 
     def initialize(self):
         self.products.initialize()
@@ -216,6 +271,11 @@ class OrderStore:
                 );
             """)
             columns = {column[1] for column in connection.execute("PRAGMA table_info(orders)")}
+            if (not connection.execute("PRAGMA table_info(expense_corrections)").fetchone()
+                    and connection.execute("PRAGMA table_info(expenses)").fetchone()):
+                self._backup_database("financial-history")
+            ExpenseStore.ensure_schema(connection)
+            ConsumptionStore.ensure_schema(connection)
             if "payment_arrangement" not in columns:
                 # NULL preserves the unknown arrangement of existing orders.
                 connection.execute("""
@@ -363,7 +423,7 @@ class OrderStore:
         with closing(self.products.connect()) as connection, connection:
             result = connection.execute("""
                 UPDATE orders SET preparation_status = ?
-                WHERE id = ? AND preparation_status <> 'Received'
+                WHERE id = ? AND archived_at IS NULL AND preparation_status <> 'Received'
             """, (statuses[status], order_id))
             if result.rowcount != 1:
                 raise ValueError("This order is unavailable or has already been received.")
@@ -552,14 +612,16 @@ class OrderStore:
         with closing(self.products.connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(_ORDER_BALANCES + """
-                SELECT outstanding_balance_centavos, total_centavos - recorded_paid
+                SELECT outstanding_balance_centavos, total_centavos - recorded_paid, archived_at
                 FROM order_balances WHERE id = ?
             """, (order_id,)).fetchone()
             if row is None:
                 return False
-            if max(row) > 0:
-                raise OutstandingBalanceError("This order still has an unpaid balance. Settle it before deleting.")
-            self._delete_paid_order(connection, order_id)
+            if max(row[:2]) > 0:
+                raise OutstandingBalanceError(ORDER_BALANCE_MESSAGE)
+            if row[2] is not None:
+                return False
+            self._archive_paid_order(connection, order_id)
             return True
 
     def delete_history(self, start, end, expected_ids):
@@ -575,16 +637,16 @@ class OrderStore:
             if any(balance > 0 for balance in visible.values()):
                 raise OutstandingBalanceError(HISTORY_BALANCE_MESSAGE)
             for order_id in visible:
-                self._delete_paid_order(connection, order_id)
+                self._archive_paid_order(connection, order_id)
             return len(visible)
 
     @staticmethod
-    def _delete_paid_order(connection, order_id):
-        for table in ("order_items", "payments", "order_arrangement_transfers"):
-            connection.execute(f"DELETE FROM {table} WHERE order_id = ?", (order_id,))
-        result = connection.execute("DELETE FROM orders WHERE id = ?", (order_id,))
+    def _archive_paid_order(connection, order_id):
+        result = connection.execute("""
+            UPDATE orders SET archived_at = CURRENT_TIMESTAMP WHERE id = ? AND archived_at IS NULL
+        """, (order_id,))
         if result.rowcount != 1:
-            raise sqlite3.IntegrityError("The selected order could not be deleted.")
+            raise sqlite3.IntegrityError("The selected order could not be archived.")
 
     def financial_totals(self, start, end):
         return self.report_summary(start, end)[:3]

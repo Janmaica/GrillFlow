@@ -192,16 +192,24 @@ class ProductStore:
         removable_photo = None
         with closing(self.connect()) as connection, connection:
             connection.execute("BEGIN IMMEDIATE")
-            has_orders = connection.execute("""
-                SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'order_items'
-            """).fetchone()
-            referenced = has_orders and connection.execute(
-                "SELECT 1 FROM order_items WHERE product_id = ? LIMIT 1", (product_id,),
-            ).fetchone()
+            history_tables = connection.execute("""
+                SELECT name FROM sqlite_master WHERE type = 'table'
+                AND name IN ('order_items', 'family_consumption')
+            """).fetchall()
+            referenced = any(connection.execute(
+                f"SELECT 1 FROM {table} WHERE product_id = ? LIMIT 1", (product_id,),
+            ).fetchone() for (table,) in history_tables)
             if referenced:
-                raise ProductConflict("This product is referenced by retained orders and cannot be permanently deleted.")
-            row = connection.execute("SELECT image_path FROM products WHERE id = ?", (product_id,)).fetchone()
-            result = connection.execute("DELETE FROM products WHERE id = ?", (product_id,))
+                result = connection.execute(
+                    "UPDATE products SET is_active = 0 WHERE id = ? AND is_active = 1", (product_id,)
+                )
+                if result.rowcount != 1:
+                    raise ProductConflict("This product no longer exists.")
+                return
+            row = connection.execute(
+                "SELECT image_path FROM products WHERE id = ? AND is_active = 1", (product_id,)
+            ).fetchone()
+            result = connection.execute("DELETE FROM products WHERE id = ? AND is_active = 1", (product_id,))
             if result.rowcount != 1:
                 raise ProductConflict("This product no longer exists.")
             if row[0]:
@@ -235,6 +243,19 @@ class ProductStore:
             return candidate
         except (OSError, RuntimeError):
             return None
+
+    def remove_unreferenced_photos(self, image_paths):
+        failures = 0
+        with closing(self.connect()) as connection, connection:
+            connection.execute("BEGIN IMMEDIATE")
+            for image_path in image_paths:
+                photo = self._exclusive_photo(connection, image_path)
+                if photo is not None:
+                    try:
+                        photo.unlink(missing_ok=True)
+                    except OSError:
+                        failures += 1
+        return failures
 
     def list_products(self):
         with closing(self.connect()) as connection:

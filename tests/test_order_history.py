@@ -78,29 +78,36 @@ class OrderHistoryTests(unittest.TestCase):
         self.assertEqual(self.ids(self.today), frozenset({ids[2]}))
         self.assertEqual(self.ids(self.week), frozenset(ids[1:4]))
 
-    def test_delete_updates_accounting_and_preserves_other_receipts_and_stock(self):
+    def test_delete_preserves_accounting_receipts_and_stock(self):
         first = self.save_at(self.today[0])
         second = self.save_at(self.today[0])
         receipt = self.orders.get_receipt(second)
         accounting = self.orders.sales_summary()
         stock = self.products.list_products()[0]["stock"]
+        trend = self.orders.sales_trend(*self.today, hourly=True)
+        ranking = self.orders.ranked_products(*self.today)
+        first_receipt = self.orders.get_receipt(first)
         self.assertEqual(self.orders.financial_totals(*self.today), (20000, 20000, 0))
         self.assertTrue(self.orders.delete_order(first))
         self.assertFalse(self.orders.delete_order(first))
         reopened = OrderStore(ProductStore(self.directory))
         reopened.initialize()
         self.assertEqual(self.ids(self.today, reopened), frozenset({second}))
-        self.assertIsNone(reopened.get_receipt(first))
+        self.assertEqual(reopened.get_receipt(first), first_receipt)
+        self.assertNotIn(first, [order["saved_id"] for order in reopened.sales_summary()[1]])
         self.assertEqual(reopened.get_receipt(second), receipt)
-        self.assertEqual(reopened.financial_totals(*self.today), (10000, 10000, 0))
+        self.assertEqual(reopened.report_summary(*self.today), (20000, 20000, 0, 2))
+        self.assertEqual(reopened.sales_trend(*self.today, hourly=True), trend)
+        self.assertEqual(reopened.ranked_products(*self.today), ranking)
         self.assertEqual(reopened.sales_summary()[0]["active"], accounting[0]["active"] - 1)
         self.assertEqual(self.products.list_products()[0]["stock"], stock)
         with closing(self.products.connect()) as connection:
             self.assertEqual(connection.execute(
                 "SELECT COUNT(archived_at), COUNT(*), SUM(outstanding_balance_centavos) FROM orders"
-            ).fetchone(), (0, 1, 0))
+            ).fetchone(), (1, 2, 0))
             for table in ("order_items", "payments"):
-                self.assertEqual(connection.execute(f"SELECT order_id FROM {table}").fetchall(), [(second,)])
+                self.assertEqual(connection.execute(f"SELECT order_id FROM {table} ORDER BY order_id").fetchall(),
+                                 [(first,), (second,)])
             self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
 
     def test_clear_today_and_week_without_deleting_new_or_outside_orders(self):
@@ -109,6 +116,7 @@ class OrderHistoryTests(unittest.TestCase):
         today = self.save_at(self.today[0])
         preview = self.ids(self.today)
         newer = self.save_at(self.today[0])
+        weekly_expected = self.orders.report_summary(*self.week)
         with self.assertRaisesRegex(ValueError, "history changed"):
             self.orders.delete_history(*self.today, preview)
         self.assertEqual(self.ids(self.today), frozenset({today, newer}))
@@ -119,7 +127,8 @@ class OrderHistoryTests(unittest.TestCase):
             self.assertEqual(connection.execute(
                 "SELECT id FROM orders WHERE archived_at IS NULL"
             ).fetchall(), [(outside,)])
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM orders").fetchone(), (1,))
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM orders").fetchone(), (4,))
+        self.assertEqual(self.orders.report_summary(*self.week), weekly_expected)
 
     def test_delete_history_rolls_back_paid_orders_and_transfer_audit(self):
         first = self.save_at(self.today[0], PARTIAL, 4000)
@@ -130,7 +139,7 @@ class OrderHistoryTests(unittest.TestCase):
         originals = [self.orders.get_receipt(order_id) for order_id in sorted(expected)]
         with closing(self.products.connect()) as connection, connection:
             connection.execute(f"""
-                CREATE TRIGGER block_test_delete BEFORE DELETE ON orders WHEN OLD.id = {second}
+                CREATE TRIGGER block_test_delete BEFORE UPDATE OF archived_at ON orders WHEN OLD.id = {second}
                 BEGIN SELECT RAISE(ABORT, 'test deletion failure'); END
             """)
         with self.assertRaisesRegex(sqlite3.IntegrityError, "test deletion failure"):
@@ -144,7 +153,7 @@ class OrderHistoryTests(unittest.TestCase):
             connection.execute("DROP TRIGGER block_test_delete")
         self.assertEqual(self.orders.delete_history(*self.today, expected), 2)
         with closing(self.products.connect()) as connection:
-            self.assertEqual(connection.execute("SELECT COUNT(*) FROM order_arrangement_transfers").fetchone(), (0,))
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM order_arrangement_transfers").fetchone(), (1,))
             self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
 
     def test_recent_history_credit_and_archive_balance_rules(self):
@@ -172,6 +181,11 @@ class OrderHistoryTests(unittest.TestCase):
         self.orders.record_payment(credit, PAID, 6000, expected_paid=4000)
         self.assertFalse(self.orders.active_credit())
         self.assertEqual(self.orders.get_receipt(credit).payment_label, "Paid")
+        credit_receipt = self.orders.get_receipt(credit)
+        summary = self.orders.report_summary(*self.today)
+        self.assertTrue(self.orders.delete_order(credit))
+        self.assertEqual(self.orders.get_receipt(credit), credit_receipt)
+        self.assertEqual(self.orders.report_summary(*self.today), summary)
         self.assertEqual(self.orders.get_receipt(later).payment_label, "Unpaid")
         with closing(self.products.connect()) as conn, conn:
             # Historical archives remain included in the outstanding count.

@@ -141,17 +141,24 @@ python main.py
 
 **Note:** The current version is a Windows-tested Kivy prototype. Android APK packaging has not yet been completed.
 
-## Permanent deletion
+## Financial history
 
-Confirmed deletion of a fully paid order removes the sale, its line items, its
-payment history, and its credit-transfer audit entry. Its revenue and payments
-are removed from Dashboard and Reports totals. Stock is not restored. Clear
-History applies these rules only to visible orders in the selected period and
-is blocked if any selected order has an outstanding balance.
+Deleting a fully paid order removes it from Order History and Recent Orders.
+SQLite retains the original sale, item snapshots, payments, and credit-transfer
+history for reporting. Clear History archives visible orders in the selected
+period in one transaction and is blocked if any selected order has an
+outstanding balance. Neither action restores stock.
 
-Retained orders protect their referenced products from deletion. An unused
-product can be permanently deleted, and its name becomes available for reuse.
-Previously archived records are retained.
+Products with sales are made inactive when removed. Their item snapshots still
+contribute to product rankings, and their names can be used for new products.
+Deleting an expense hides it from the expense list while retaining its original
+contribution to Dashboard and Reports. Editing an expense updates the recognized
+record and logs the previous amount, category, and date when those fields change.
+
+The expense migration creates a verified local backup before updating an
+existing expense schema. Reset All Data clears both operational and preserved
+financial records, including expense corrections, after its existing explicit
+confirmation and backup.
 
 ## Project Goals
 

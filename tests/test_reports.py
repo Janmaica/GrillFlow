@@ -5,6 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from expense_store import ExpenseStore
 from order_draft import OrderDraft
 from order_store import CREDIT, PAID, OrderStore, report_bounds
 from product_store import ProductFields, ProductStore
@@ -89,7 +90,7 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(self.orders.financial_totals(*self.day), (2500, 3700, 0))
         self.assertTrue(self.orders.delete_order(paid))
         reopened = OrderStore(ProductStore(self.directory))
-        self.assertEqual(reopened.report_summary(*self.day), (2000, 3200, 0, 1))
+        self.assertEqual(reopened.report_summary(*self.day), (2500, 3700, 0, 2))
         self.assertEqual(reopened.get_receipt(old).balance, 1800)
 
     def test_product_ranking_uses_snapshots_independently_of_stock(self):
@@ -103,6 +104,33 @@ class ReportTests(unittest.TestCase):
         ])
         self.assertEqual({row["name"]: row["stock"] for row in self.products.list_products()},
                          {"Renamed": 12, "Rice": 0})
+
+    def test_operational_deletions_preserve_every_reporting_period(self):
+        order_id = self.save(self.day[0], self.skewer, 3, PAID, 3000)
+        expenses = ExpenseStore(self.products)
+        expense_id = expenses.save("Charcoal", "Charcoal", 700, "2026-11-19 10:00", "")
+
+        def snapshot(orders, expenses):
+            result = []
+            for period in ("This Day", "This Week", "This Month"):
+                bounds = report_bounds(period, self.now)
+                result.append((
+                    orders.report_summary(*bounds), orders.sales_trend(*bounds, hourly=period == "This Day"),
+                    orders.ranked_products(*bounds), expenses.total(*bounds),
+                ))
+            return result
+
+        before = snapshot(self.orders, expenses)
+        self.assertEqual(before[0][0], (3000, 3000, 0, 1))
+        self.assertTrue(self.orders.delete_order(order_id))
+        self.assertEqual(snapshot(self.orders, expenses), before)
+        self.products.delete(self.skewer)
+        self.assertEqual(snapshot(self.orders, expenses), before)
+        expenses.delete(expense_id)
+        reopened_products = ProductStore(self.directory)
+        reopened_orders = OrderStore(reopened_products)
+        reopened_orders.initialize()
+        self.assertEqual(snapshot(reopened_orders, ExpenseStore(reopened_products)), before)
 
     def test_windows_output_writes_csv_and_printable_html(self):
         rows = [("GrillFlow", "Report"), ("Product", "=1+1"), ("Sale", "<unsafe>")]

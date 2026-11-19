@@ -8,7 +8,10 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.spinner import Spinner
 
-from order_store import HISTORY_BALANCE_MESSAGE, HISTORY_PERIODS, PHILIPPINE_TIME, OutstandingBalanceError, history_bounds
+from order_store import (
+    HISTORY_BALANCE_MESSAGE, HISTORY_PERIODS, ORDER_BALANCE_MESSAGE, PHILIPPINE_TIME,
+    OutstandingBalanceError, history_bounds,
+)
 from product_store import format_price
 from receipt_data import display_payment_status
 from screens.add_product_screen import _UnitOption
@@ -149,7 +152,7 @@ class OrderHistoryScreen(Screen):
                 order, self._open_receipt, self._confirm_delete, self._open_payment,
             ))
         if not self.rows:
-            self.list.add_widget(wrapping_label("No orders for this period.", 15, MUTED, align="center"))
+            self.list.add_widget(wrapping_label("No orders available", 15, MUTED, align="center"))
 
     def _open_receipt(self, order):
         self.manager.get_screen("receipt").open_order(order["id"], return_screen=self.name)
@@ -163,16 +166,15 @@ class OrderHistoryScreen(Screen):
     def _confirm_delete(self, order):
         if order["outstanding_balance_centavos"] > 0:
             self._show_sheet("Cannot Delete Order",
-                             "This order still has an unpaid balance. Settle it before deleting.",
+                             ORDER_BALANCE_MESSAGE,
                              confirmation="OK")
             return
         self._confirm(
-            "Permanently Delete?",
-            "This action will permanently remove the selected record from GrillFlow. It cannot be undone.\n\n"
-            f"{order['order_number']} · {order['customer_name']}\n"
-            "Its payment history and recorded revenue will also be removed.",
-            "Delete Permanently", lambda: self.orders.delete_order(order["id"]),
-            "Order permanently deleted.",
+            "Delete Order?",
+            f"{order['order_number']} · {order['customer_name']}\n\n"
+            "This order will be removed from the list. Its financial history will be preserved for reports.",
+            "Delete Record", lambda: self.orders.delete_order(order["id"]),
+            "Order removed from history.",
         )
 
     def _confirm_clear(self, *_):
@@ -184,11 +186,11 @@ class OrderHistoryScreen(Screen):
         bounds = self.bounds
         ids = frozenset(order["id"] for order in self.rows)
         self._confirm(
-            "Permanently Clear History?",
-            f"This will permanently delete {len(ids)} orders and their associated payment records. "
-            f"This action cannot be undone.\n\nPeriod: {self.period.text}",
-            "Clear Permanently", lambda: self.orders.delete_history(*bounds, ids),
-            "Selected orders permanently deleted.",
+            "Clear Order History?",
+            f"Remove {len(ids)} orders from the {self.period.text} list? "
+            "Their financial history will be preserved for reports.",
+            "Clear History", lambda: self.orders.delete_history(*bounds, ids),
+            "Selected orders removed from history.",
         )
 
     def _show_sheet(self, title, message, *, confirmation="Close"):
@@ -212,13 +214,13 @@ class OrderHistoryScreen(Screen):
                 changed = action()
             except OutstandingBalanceError as error:
                 self._refresh()
-                self._show_sheet("Cannot Clear History" if action_label == "Clear Permanently" else "Cannot Delete Order",
+                self._show_sheet("Cannot Clear History" if action_label == "Clear History" else "Cannot Delete Order",
                                  str(error), confirmation="OK")
                 return
             except ValueError as error:
                 notice = str(error)
             except (OSError, sqlite3.Error) as error:
-                Logger.warning("History: Permanent deletion failed: %s", error)
+                Logger.warning("History: Could not archive orders: %s", error)
                 notice = "Could not update order history. Try again."
             else:
                 notice = success if changed else "Order is already absent from history."

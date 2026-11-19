@@ -23,7 +23,7 @@ class OrderStoreTests(unittest.TestCase):
         self.execute("UPDATE orders SET archived_at = CURRENT_TIMESTAMP WHERE id = ?", (henry.id,))
         self.orders.delete_history("2000", "2100", {maria.id, duplicate.id})
         self.assertEqual(self.orders.named_customers(), ["Henry"])
-        self.assertIsNone(self.orders.get_receipt(maria.id))
+        self.assertEqual(self.orders.get_receipt(maria.id).balance, 0)
         self.orders.record_credit_payment(henry.id, 2550, expected_paid=0)
         reopened = OrderStore(ProductStore(self.products.data_dir))
         self.assertEqual(reopened.named_customers(), [])

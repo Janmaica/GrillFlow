@@ -19,6 +19,7 @@ from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
 
 from order_store import PHILIPPINE_TIME, history_bounds
@@ -41,7 +42,7 @@ METRICS = (
     ("Unpaid Credit", "bill"),
     ("Expenses", "receipt"),
     ("Net Profit", "trend"),
-    ("Available Cash", "bars"),
+    ("Family Consumption", "utensils"),
 )
 
 # Examples illustrate each metric independently of the dashboard card values.
@@ -75,10 +76,11 @@ METRIC_DETAILS = {
             ("Net Profit", "₱1,400"),
         ),
     ),
-    "Available Cash": (
-        "Kwarta nga Magamit Karon",
-        "Ang nahibiling kwarta human ibawas ang nabayrang mga gasto gikan sa nadawat nga cash.",
-        "Cash Collected ₱2,500 - Cash Expenses ₱400 = Available Cash ₱2,100.",
+    "Family Consumption": (
+        "Gibanabanang Presyo sa Pagbaligya",
+        "Ang Family Consumption mao ang mga produkto sa negosyo nga gigamit sa pamilya imbes ibaligya. "
+        "Gibase ang kantidad sa presyo sa pagbaligya. Lahi kini sa halin ug aktuwal nga gasto sa negosyo.",
+        "5 ka stick × ₱15 nga presyo sa pagbaligya = ₱75 nga gibanabanang retail value.",
     ),
 }
 
@@ -119,6 +121,23 @@ ICON_PATHS = {
     "delete": ((.19,.76,.81,.76), (.38,.76,.38,.87,.62,.87,.62,.76),
                (.26,.70,.31,.16,.69,.16,.74,.70), (.43,.61,.43,.30), (.57,.61,.57,.30)),
     "chevron": ((.34,.80,.66,.50,.34,.20),),
+    "menu": ((.12,.75,.88,.75), (.12,.50,.88,.50), (.12,.25,.88,.25)),
+    "utensils": ((.18,.90,.18,.63,.32,.50,.46,.63,.46,.90),
+                 (.32,.90,.32,.12), (.76,.12,.76,.90,.66,.78,.62,.60,.62,.45,.76,.45)),
+    "family": ((.35,.72,.40,.82,.50,.85,.60,.82,.65,.72,.60,.62,.50,.59,.40,.62,.35,.72),
+               (.23,.16,.25,.32,.34,.43,.66,.43,.75,.32,.77,.16,.23,.16),
+               (.24,.74,.16,.77,.09,.70,.09,.61,.16,.55,.25,.58),
+               (.76,.74,.84,.77,.91,.70,.91,.61,.84,.55,.75,.58),
+               (.17,.43,.09,.39,.05,.27,.05,.20,.14,.20), (.83,.43,.91,.39,.95,.27,.95,.20,.86,.20)),
+    "cloche": ((.07,.22,.93,.22), (.13,.36,.17,.50,.27,.64,.39,.73,.61,.73,.73,.64,
+                 .83,.50,.87,.36,.13,.36), (.50,.73,.50,.85)),
+    "category_grid": (),
+    "dots": (),
+    "ingredients": ((.10,.53,.90,.53,.82,.31,.67,.17,.33,.17,.18,.31,.10,.53),
+                    (.50,.53,.35,.73,.20,.81,.27,.61,.50,.53,.65,.80,.80,.88,.73,.65,.50,.53)),
+    "calendar": ((.12,.78,.88,.78,.88,.14,.12,.14,.12,.78),
+                 (.12,.57,.88,.57), (.31,.68,.31,.89), (.69,.68,.69,.89)),
+    "tag": ((.10,.53,.57,.11,.90,.44,.48,.86,.10,.86,.10,.53),),
     "person": ((.50,.48,.35,.55,.30,.69,.36,.83,.50,.89,.64,.83,.70,.69,.65,.55,.50,.48),
                (.13,.15,.17,.28,.30,.38,.70,.38,.83,.28,.87,.15)),
 }
@@ -165,6 +184,14 @@ class Icon(Widget):
                 Line(circle=(x + side * .43, y + side * .57, side * .29), width=dp(1.2))
             elif self.name == "camera":
                 Line(circle=(self.center_x, y + side * .48, side * .16), width=dp(1.2))
+            elif self.name == "category_grid":
+                for cx, cy in ((.28, .28), (.72, .28), (.28, .72), (.72, .72)):
+                    Line(circle=(x + side * cx, y + side * cy, side * .13), width=dp(1.2))
+            elif self.name == "dots":
+                for cx in (.22, .50, .78):
+                    self._dot(x, y, side, cx, .50)
+            elif self.name == "tag":
+                self._dot(x, y, side, .30, .67)
 
     @staticmethod
     def _dot(x, y, side, cx, cy):
@@ -250,6 +277,12 @@ class MetricCard(FloatLayout):
         self.add_widget(self.info_button)
 
 
+class _ClickableMetricCard(ButtonBehavior, MetricCard):
+    def __init__(self, metric, show_info, **kwargs):
+        super().__init__(metric=metric, show_info=show_info, **kwargs)
+        self.bind(on_release=lambda *_: show_info(metric))
+
+
 class SalesChart(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -303,6 +336,21 @@ class SalesChart(Widget):
                 if index % label_every == 0:
                     Color(*INK)
                     self._caption(hour, x, self.y + dp(6), centered=True)
+
+
+class _DashboardAction(ButtonBehavior, BoxLayout):
+    def __init__(self, title, subtitle, icon):
+        super().__init__(orientation="vertical", padding=(dp(10), dp(8)), spacing=dp(3))
+        paint_surface(self, WHITE, radius=13, border=BORDER)
+        holder = AnchorLayout(anchor_x="left", size_hint_y=None, height=dp(24))
+        holder.add_widget(Icon(icon, ORANGE, size_hint=(None, None), size=(dp(22), dp(22))))
+        self.add_widget(holder)
+        self.add_widget(label(title, 14, bold=True, size_hint_y=None, height=dp(22)))
+        self.add_widget(label(subtitle, 12, MUTED))
+        self.bind(state=self._show_press)
+
+    def _show_press(self, _, state):
+        self.opacity = .8 if state == "down" else 1
 
 
 class NavigationTab(ButtonBehavior, BoxLayout):
@@ -481,9 +529,11 @@ class FinancialInfoBottomSheet(BottomSheet):
 
 
 class DashboardScreen(Screen):
-    def __init__(self, orders, **kwargs):
+    def __init__(self, orders, expenses, consumption, **kwargs):
         super().__init__(**kwargs)
         self.orders = orders
+        self.expenses = expenses
+        self.consumption = consumption
         self.selected_date = datetime.now(PHILIPPINE_TIME).date()
         self.sheet = None
 
@@ -509,10 +559,14 @@ class DashboardScreen(Screen):
         self.metrics = GridLayout(cols=2, size_hint_y=None, spacing=dp(9),
                                   row_force_default=True)
         self.metrics.bind(minimum_height=self.metrics.setter("height"))
-        self.metric_cards = {metric[0]: MetricCard(metric, self._show_metric) for metric in METRICS}
-        for card in self.metric_cards.values():
+        self.metric_cards = {}
+        for metric in METRICS:
+            card_type = _ClickableMetricCard if metric[0] == "Family Consumption" else MetricCard
+            card = card_type(metric, self._show_metric)
+            self.metric_cards[metric[0]] = card
             self.metrics.add_widget(card)
         self.content.add_widget(self.metrics)
+        self.content.add_widget(self._build_quick_actions())
 
         self.trend = BoxLayout(
             orientation="vertical", size_hint_y=None, padding=(dp(12), dp(5), dp(10), dp(7)),
@@ -540,10 +594,137 @@ class DashboardScreen(Screen):
         emblem.add_widget(Icon("flame", WHITE, size_hint=(None, None), size=(dp(24), dp(27))))
         header.add_widget(emblem)
         header.add_widget(label("GrillFlow", 23, WHITE, bold=True))
-        self.bell_button = IconButton("bell", WHITE, 21, size_hint_x=None, width=dp(44))
-        self.bell_button.bind(on_release=lambda *_: self._show_sheet("Notifications", "Coming Soon"))
-        header.add_widget(self.bell_button)
+        self.menu_button = IconButton("menu", WHITE, 21, size_hint_x=None, width=dp(44))
+        self.menu_button.bind(on_release=self._open_owner_menu)
+        header.add_widget(self.menu_button)
         return header
+
+    def _build_quick_actions(self):
+        section = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(119), spacing=dp(5))
+        section.add_widget(label("Quick Actions", 16, bold=True, size_hint_y=None, height=dp(23)))
+        row = BoxLayout(spacing=dp(9))
+        for title, subtitle, icon in (
+            ("Record Expense", "Business spending", "receipt"),
+            ("Family Consumption", "Items for family use", "utensils"),
+        ):
+            action = _DashboardAction(title, subtitle, icon)
+            if title == "Record Expense":
+                action.bind(on_release=self._open_expenses)
+            else:
+                action.bind(on_release=self._open_consumption)
+            row.add_widget(action)
+        section.add_widget(row)
+        return section
+
+    def _open_expenses(self, *_):
+        self.manager.current = "expenses"
+
+    def _open_consumption(self, *_):
+        self.manager.current = "family_consumption"
+
+    def _open_owner_menu(self, *_):
+        sheet = BottomSheet("Menu", None)
+        for text, action in (
+            ("Settings (Coming Soon)", lambda *_: self._show_sheet("Settings", "Coming Soon")),
+            ("Reset All Data", self._confirm_reset),
+        ):
+            button = _RoundedButton(text=text, size_hint_y=None, height=dp(44))
+            button.bind(on_release=action)
+            sheet.copy.add_widget(button)
+        self._open_sheet(sheet)
+
+    def _confirm_reset(self, *_):
+        sheet = BottomSheet(
+            "Reset GrillFlow?",
+            "This will permanently delete all products, orders, order history, customers, payments, "
+            "credit balances, expenses, family consumption, and reporting records. This action cannot be undone.\n\n"
+            "Type RESET to continue. A local SQLite backup will be saved before any records are deleted.",
+            confirmation="Cancel",
+        )
+        field_holder = BoxLayout(size_hint_y=None, height=dp(44))
+        paint_surface(field_holder, CREAM, radius=10, border=BORDER)
+        phrase = TextInput(
+            hint_text="RESET", multiline=False, font_size=sp(16), padding=(dp(10), dp(10)),
+            background_normal="", background_active="", background_color=(0, 0, 0, 0),
+            foreground_color=INK,
+        )
+        field_holder.add_widget(phrase)
+        sheet.copy.add_widget(field_holder)
+        confirm = _RoundedButton(text="Confirm Reset", size_hint_y=None, height=dp(46))
+        confirm.disabled = True
+        sheet.copy.add_widget(confirm)
+        phrase.bind(text=lambda _, value: setattr(confirm, "disabled", value != "RESET"))
+        sheet.bind(parent=lambda _, parent: setattr(phrase, "focus", False) if parent is None else None)
+
+        def submit(*_):
+            if confirm.disabled or sheet.parent is None or phrase.text != "RESET":
+                return
+            confirm.disabled = sheet.confirm_button.disabled = True
+            phrase.disabled = True
+            phrase.focus = False
+            try:
+                result = self.orders.reset_all_data()
+            except (OSError, sqlite3.Error) as error:
+                Logger.warning("Dashboard: Reset failed: %s", error)
+                self._show_sheet("Reset Failed", "No business records were cleared. Check storage access and try again.")
+                return
+            sheet.dismiss()
+            self._refresh_after_reset()
+            message = f"Business data cleared.\n\nSQLite backup: {result.backup_path}"
+            if result.photo_cleanup_failed:
+                message += "\n\nSome uploaded photos could not be removed."
+            self._show_sheet("Reset Complete", message)
+
+        confirm.bind(on_release=submit)
+        self._open_sheet(sheet)
+
+    def _refresh_after_reset(self):
+        for name in ("products", "sales", "new_order", "receipt", "order_history", "utang",
+                     "reports", "expenses", "family_consumption"):
+            screen = self.manager.get_screen(name)
+            if screen.sheet:
+                screen.sheet.dismiss()
+                screen.sheet = None
+        products = self.manager.get_screen("products")
+        products.search_input.text = ""
+        products.hide_notice.cancel()
+        products._hide_notice()
+        products._refresh_products()
+        self.manager.get_screen("sales")._refresh_orders()
+        draft = self.manager.get_screen("new_order")
+        if draft.customer_dropdown is not None:
+            draft.customer_dropdown.dismiss()
+        draft.reset_after_sale()
+        draft._reload_products()
+        edit = self.manager.get_screen("add_product")
+        edit.editing = None
+        edit.on_pre_enter()
+        payment = self.manager.get_screen("payment")
+        payment.draft.lines.clear()
+        payment.customer = ""
+        payment.details.clear_widgets()
+        payment.remarks_input.text = ""
+        payment.amount_input.text = ""
+        payment.save_button.disabled = True
+        receipt = self.manager.get_screen("receipt")
+        receipt.receipt = None
+        receipt.paper.clear_widgets()
+        receipt.print_button.disabled = receipt.share_button.disabled = True
+        history = self.manager.get_screen("order_history")
+        history._set_notice("")
+        history._refresh()
+        utang = self.manager.get_screen("utang")
+        utang.expanded.clear()
+        utang.search.text = ""
+        utang._refresh()
+        self.manager.get_screen("reports")._refresh()
+        self.manager.get_screen("expenses").refresh()
+        consumption = self.manager.get_screen("family_consumption")
+        consumption.notice.text = ""
+        consumption.search_input.text = ""
+        consumption.period.text = "This Day"
+        consumption.refresh()
+        self._select_date(datetime.now(PHILIPPINE_TIME).date())
 
     def _resize_content(self, _, height):
         self.metrics.row_default_height = max(dp(86), min(dp(132), height * .19))
@@ -577,6 +758,18 @@ class DashboardScreen(Screen):
             series = []
         for title, value in zip(titles, totals):
             self.metric_cards[title].amount.text = "—" if value is None else format_price(value)
+        try:
+            expense_text = format_price(self.expenses.total(*bounds))
+        except (OSError, sqlite3.Error) as error:
+            Logger.warning("Dashboard: Could not load expenses: %s", error)
+            expense_text = "—"
+        self.metric_cards["Expenses"].amount.text = expense_text
+        try:
+            consumption_text = format_price(self.consumption.total(*bounds))
+        except (OSError, sqlite3.Error) as error:
+            Logger.warning("Dashboard: Could not load family consumption: %s", error)
+            consumption_text = "—"
+        self.metric_cards["Family Consumption"].amount.text = consumption_text
         self.chart.set_series(series)
 
     def _open_date_selector(self, button):

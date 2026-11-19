@@ -71,7 +71,7 @@ class ProductManagementTests(unittest.TestCase):
         self.products.delete(product)
         self.assertTrue(outside.is_file())
 
-    def test_retained_order_blocks_product_deletion(self):
+    def test_sold_product_can_be_removed_without_losing_sales(self):
         orders = OrderStore(self.products)
         orders.initialize()
         product_id = self.products.add(self.fields())
@@ -81,12 +81,12 @@ class ProductManagementTests(unittest.TestCase):
         original_receipt = orders.get_receipt(order.id)
         current = self.products.list_products()[0]
         self.products.update(current, self.fields("Pork skewer", "18.00", "80"), None)
-        with self.assertRaisesRegex(ProductConflict, "referenced by retained orders"):
-            self.products.delete(product_id)
-        self.assertEqual([row["id"] for row in self.products.list_products()], [product_id])
+        ranking = orders.ranked_products("2000", "2100")
+        self.products.delete(product_id)
+        self.assertEqual(self.products.list_products(), [])
         self.assertEqual(orders.get_receipt(order.id), original_receipt)
         self.assertTrue(orders.delete_order(order.id))
-        self.products.delete(product_id)
+        self.assertEqual(orders.ranked_products("2000", "2100"), ranking)
         with self.assertRaisesRegex(ValueError, "no longer available"):
             orders.save_order(draft, "", PAID, 1500, "")
         self.assertFalse(self.products.name_exists("  PORK   SKEWER "))
@@ -98,9 +98,9 @@ class ProductManagementTests(unittest.TestCase):
         with closing(self.products.connect()) as connection:
             self.assertEqual(connection.execute(
                 "SELECT stock, selling_price, is_active FROM products ORDER BY id"
-            ).fetchall(), [(9, 2500, 1)])
+            ).fetchall(), [(80, 1800, 0), (9, 2500, 1)])
             self.assertEqual(connection.execute("PRAGMA foreign_key_check").fetchall(), [])
-        self.assertIsNone(orders.get_receipt(order.id))
+        self.assertEqual(orders.get_receipt(order.id), original_receipt)
 
     def test_legacy_duplicates_are_reported_and_preserved(self):
         self.products.add(self.fields())

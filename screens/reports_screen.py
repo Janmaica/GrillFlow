@@ -31,12 +31,14 @@ EMPTY_PRODUCTS = "No product sales available for this period."
 
 
 class ReportsScreen(Screen):
-    def __init__(self, orders, **kwargs):
+    def __init__(self, orders, expenses, **kwargs):
         super().__init__(**kwargs)
         self.orders = orders
+        self.expenses = expenses
         self.tab = SALES_TAB
         self.sheet = None
         self.totals, self.series, self.ranking, self.inventory = (0, 0, 0, 0), [], [], []
+        self.expense_total = 0
         self.loaded = False
 
         shell = BoxLayout(orientation="vertical")
@@ -108,6 +110,7 @@ class ReportsScreen(Screen):
         self.scroll.scroll_y = 1
         try:
             self.totals = self.orders.report_summary(*bounds)
+            self.expense_total = self.expenses.total(*bounds)
             self.series = self.orders.sales_trend(*bounds, hourly=self.period.text == "This Day")
             self.ranking = self.orders.ranked_products(*bounds)
             self.inventory = self.orders.products.list_products()
@@ -139,7 +142,8 @@ class ReportsScreen(Screen):
     def _summary_entries(self):
         sales, cash, credit, count = self.totals
         return (("Total Sales", format_price(sales)), ("Orders", str(count)),
-                ("Cash Collected", format_price(cash)), ("Outstanding Credit", format_price(credit)))
+                ("Cash Collected", format_price(cash)), ("Outstanding Credit", format_price(credit)),
+                ("Expenses", format_price(self.expense_total)))
 
     def _summary_cards(self):
         grid = GridLayout(cols=2, size_hint_y=None, spacing=dp(8), row_default_height=dp(78),

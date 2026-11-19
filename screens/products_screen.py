@@ -231,12 +231,12 @@ class ProductsScreen(Screen):
 
     def _confirm_delete(self, product):
         sheet = self._show_sheet(
-            "Permanently Delete?",
-            "This action will permanently remove the selected record from GrillFlow. "
-            f"It cannot be undone.\n\nProduct: {product['name']}",
+            "Delete Product?",
+            f"{product['name']} will be removed from Products and New Order. "
+            "Its sales history will be preserved for reports.",
             confirmation="Cancel",
         )
-        delete = _RoundedButton(text="Delete Permanently", size_hint_y=None, height=dp(44))
+        delete = _RoundedButton(text="Delete Record", size_hint_y=None, height=dp(44))
         sheet.copy.add_widget(delete)
 
         def submit(*_):
@@ -254,7 +254,7 @@ class ProductsScreen(Screen):
             else:
                 sheet.dismiss()
                 self._refresh_products()
-                self.notice.text = "Product permanently deleted."
+                self.notice.text = "Product removed."
                 self.notice.height = dp(32)
                 self.hide_notice()
 
