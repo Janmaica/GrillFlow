@@ -1,19 +1,21 @@
 import sqlite3
 
+from kivy.clock import Clock
 from kivy.core.image import Image as CoreImage
 from kivy.logger import Logger
 from kivy.metrics import dp, sp
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
+from kivy.uix.dropdown import DropDown
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 
 from order_draft import OrderDraft
-from order_store import customer_name
+from order_store import customer_name, format_customer_name
 from product_photos import DEFAULT_PHOTO, product_photo_path
-from product_store import UNITS, format_price
+from product_store import UNITS, format_price, normalized_name
 from screens.add_product_screen import ProductImage
 from screens.dashboard_screen import (
     AMOUNT, BORDER, CREAM, INK, MUTED, ORANGE, WHITE, BottomSheet, Icon, IconButton,
@@ -87,7 +89,7 @@ class _ProductRow(BoxLayout):
         self.bind(minimum_height=self.setter("height"))
         self.product = product
         self.order = order
-        self.quantity = 1
+        self.quantity = order.selected_quantities.get(product["id"], 0)
         paint_surface(self, WHITE, radius=12, border=BORDER)
         self.add_widget(_product_details(
             source, product["name"], f'{format_price(product["selling_price"])} / {product["unit"]}',
@@ -97,7 +99,7 @@ class _ProductRow(BoxLayout):
         self.stock = label("", 12, MUTED, shorten=True)
         controls.add_widget(self.stock)
         self.minus = _Action("-", size_hint_x=None, width=dp(43))
-        self.count = label("1", 13, bold=True, align="center", size_hint_x=None,
+        self.count = label("0", 13, bold=True, align="center", size_hint_x=None,
                            width=dp(38), shorten=True)
         self.plus = _Action("+", size_hint_x=None, width=dp(43))
         self.add_button = _Action("+ Add", primary=True, size_hint_x=None, width=dp(69))
@@ -110,18 +112,17 @@ class _ProductRow(BoxLayout):
         self.refresh()
 
     def _step(self, amount):
-        if self.quantity + amount > self.order.draft.available(self.product):
-            self.order._show_message("Stock Limit", "There is no more stock available to add.")
-            return
-        self.quantity = max(1, self.quantity + amount)
+        self.quantity += amount
         self.refresh()
 
     def refresh(self):
         available = self.order.draft.available(self.product)
-        self.quantity = min(self.quantity, max(1, available))
+        self.quantity = max(0, min(self.quantity, available))
+        self.order.selected_quantities[self.product["id"]] = self.quantity
         self.count.text = str(self.quantity)
-        self.minus.disabled = self.quantity == 1
-        self.plus.disabled = self.add_button.disabled = available == 0
+        self.minus.disabled = self.quantity == 0
+        self.plus.disabled = self.quantity >= available
+        self.add_button.disabled = not 0 < self.quantity <= available
         if available:
             self.stock.text = f"Available: {available}"
         else:
@@ -176,12 +177,83 @@ class NewOrderScreen(Screen):
         card.add_widget(heading)
         customer_row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(7))
         field, self.customer_input = _text_field(self.draft.default_customer)
+        self.customer_input.bind(focus=self._format_customer)
+        self.customer_dropdown = None
         customer_row.add_widget(field)
         self.choose_customer = _Action("Choose Customer", font=12, size_hint_x=None, width=dp(124))
-        self.choose_customer.bind(on_release=lambda *_: self._show_message("Choose Customer", "Coming Soon"))
+        self.choose_customer.bind(on_release=self._open_customers)
         customer_row.add_widget(self.choose_customer)
         card.add_widget(customer_row)
         return card
+
+    def _format_customer(self, field, focused):
+        if not focused:
+            field.text = format_customer_name(field.text)
+
+    def _open_customers(self, button):
+        if self.customer_dropdown is not None:
+            return
+        self._clear_focus()
+        try:
+            names = self.orders.named_customers()
+        except (OSError, sqlite3.Error) as error:
+            Logger.warning("New Order: Could not load customers: %s", error)
+            self._show_message("Choose Customer", "Could not load customer names. Try again.")
+            return
+
+        dropdown = DropDown(auto_width=False, width=min(dp(300), self.width - dp(20)),
+                            max_height=dp(280), do_scroll_x=False)
+        panel = _card()
+        search_holder, search = _text_field("Search customer...")
+        panel.add_widget(search_holder)
+        results = _vertical(spacing=dp(4))
+        panel.add_widget(results)
+        dropdown.add_widget(panel)
+
+        def render(*_):
+            results.clear_widgets()
+            query = normalized_name(search.text)
+            matches = [name for name in names if query in normalized_name(name)]
+            if not names:
+                results.add_widget(wrapping_label("No customers available.", 15, bold=True))
+            elif not matches:
+                results.add_widget(wrapping_label("No matching customers found", 14, MUTED))
+            for name in matches:
+                option = _Action(name, size_hint_y=None, height=dp(44),
+                                 primary=normalized_name(name) == normalized_name(self.customer_input.text),
+                                 shorten=True, padding=(dp(8), 0))
+                option.bind(size=lambda widget, size: setattr(widget, "text_size", size))
+                option.bind(on_release=lambda _, name=name: dropdown.select(name))
+                results.add_widget(option)
+            dropdown.scroll_y = 1
+
+        def selected(_, name):
+            self.customer_input.text = format_customer_name(name)
+            search.focus = False
+
+        def refresh(_):
+            nonlocal names
+            try:
+                latest = self.orders.named_customers()
+            except (OSError, sqlite3.Error) as error:
+                Logger.warning("New Order: Could not refresh customers: %s", error)
+                dropdown.dismiss()
+                return False
+            if latest != names:
+                names = latest
+                render()
+
+        def dismissed(*_):
+            refresh_event.cancel()
+            search.focus = False
+            self.customer_dropdown = None
+
+        search.bind(text=render)
+        dropdown.bind(on_select=selected, on_dismiss=dismissed)
+        render()
+        self.customer_dropdown = dropdown
+        dropdown.open(button)
+        refresh_event = Clock.schedule_interval(refresh, 1)
 
     def _build_catalog(self):
         catalog = _vertical(spacing=dp(7))
@@ -240,6 +312,8 @@ class NewOrderScreen(Screen):
 
     def on_pre_leave(self, *_):
         self._clear_focus()
+        if self.customer_dropdown is not None:
+            self.customer_dropdown.dismiss()
         if self.sheet:
             self.sheet.dismiss()
 
@@ -257,6 +331,12 @@ class NewOrderScreen(Screen):
             self.products = {}
             self.load_failed = True
         self.photo_sources.clear()
+        if not self.load_failed:
+            self.selected_quantities = {
+                product_id: min(quantity, self.draft.available(self.products[product_id]))
+                for product_id, quantity in self.selected_quantities.items()
+                if product_id in self.products
+            }
         self._render_products()
 
     def _photo_source(self, product):
@@ -281,17 +361,12 @@ class NewOrderScreen(Screen):
         self._render_products()
 
     def _render_products(self, *_):
-        self.selected_quantities.update(
-            (product_id, row.quantity) for product_id, row in self.product_rows.items()
-        )
         self.catalog_rows.clear_widgets()
         self.product_rows.clear()
         query = self.search_input.text.strip().casefold()
         for product_id, product in self.products.items():
             if query in product["name"].casefold() and self.unit in ("All", product["unit"]):
                 row = _ProductRow(product, self._photo_source(product), self)
-                row.quantity = self.selected_quantities.get(product_id, 1)
-                row.refresh()
                 self.product_rows[product_id] = row
                 self.catalog_rows.add_widget(row)
         if not self.product_rows:
@@ -307,11 +382,17 @@ class NewOrderScreen(Screen):
             self.catalog_rows.add_widget(empty)
 
     def add_product(self, product, quantity):
+        if quantity <= 0:
+            return
         try:
             self.draft.add(product, quantity)
         except ValueError as error:
             self._show_message("Cannot Add Product", str(error))
             return
+        product_id = product["id"]
+        self.selected_quantities[product_id] = 0
+        if product_id in self.product_rows:
+            self.product_rows[product_id].quantity = 0
         self._refresh_cart()
 
     def _remove_product(self, product_id):
@@ -361,7 +442,7 @@ class NewOrderScreen(Screen):
     def _view_receipt(self, *_):
         if not self.draft.lines:
             return
-        customer = customer_name(self.customer_input.text) or self.customer_input.hint_text
+        customer = format_customer_name(customer_name(self.customer_input.text)) or self.customer_input.hint_text
         receipt = self._show_message("Draft Receipt", f"Customer: {customer}")
         for line in self.draft.lines.values():
             item = _card()

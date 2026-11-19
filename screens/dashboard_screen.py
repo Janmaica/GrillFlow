@@ -1,10 +1,13 @@
-﻿from datetime import date, timedelta
+﻿
+import sqlite3
+from datetime import datetime, time, timedelta
 
 from kivy.animation import Animation
 from kivy.core.text import Label as CoreLabel
 from kivy.graphics import Color, Ellipse, Line, Rectangle, RoundedRectangle
 from kivy.graphics.texture import Texture
 from kivy.metrics import dp, sp
+from kivy.logger import Logger
 from kivy.properties import NumericProperty
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.behaviors import ButtonBehavior
@@ -18,6 +21,8 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
+from order_store import PHILIPPINE_TIME, history_bounds
+from product_store import format_price
 from screens.splash_screen import THEME_COLORS, _RoundedButton
 
 
@@ -30,14 +35,13 @@ BORDER = (0.92, 0.87, 0.83, 1)
 AMOUNT = (0.60, 0.17, 0.02, 1)
 GREEN = (0.03, 0.40, 0.05, 1)
 
-# Sample values and hourly totals for the UI preview. No business records are read.
-SAMPLE_METRICS = (
-    ("Total Sales", 3000, "cart"),
-    ("Cash Collected", 2500, "wallet"),
-    ("Unpaid Credit", 500, "bill"),
-    ("Expenses", 400, "receipt"),
-    ("Net Profit", 1400, "trend"),
-    ("Available Cash", 2100, "bars"),
+METRICS = (
+    ("Total Sales", "cart"),
+    ("Cash Collected", "wallet"),
+    ("Unpaid Credit", "bill"),
+    ("Expenses", "receipt"),
+    ("Net Profit", "trend"),
+    ("Available Cash", "bars"),
 )
 
 # Examples illustrate each metric independently of the dashboard card values.
@@ -77,10 +81,6 @@ METRIC_DETAILS = {
         "Cash Collected ₱2,500 - Cash Expenses ₱400 = Available Cash ₱2,100.",
     ),
 }
-SAMPLE_SALES = (
-    ("8AM", 900), ("10AM", 1500), ("12PM", 1050), ("2PM", 1450),
-    ("4PM", 1950), ("6PM", 2500), ("8PM", 3000),
-)
 
 # Icon paths use coordinates from 0 to 1 inside each icon.
 ICON_PATHS = {
@@ -221,7 +221,7 @@ def paint_header_gradient(header, radius=0):
 class MetricCard(FloatLayout):
     def __init__(self, metric, show_info, **kwargs):
         super().__init__(**kwargs)
-        title, amount, icon = metric
+        title, icon = metric
         profit = title == "Net Profit"
         fill = (0.92, 0.99, 0.87, 1) if profit else WHITE
         edge = (0.78, 0.89, 0.71, 1) if profit else BORDER
@@ -236,10 +236,11 @@ class MetricCard(FloatLayout):
                                  size_hint=(None, None), size=(dp(22), dp(22))))
         content.add_widget(icon_row)
         content.add_widget(label(title, 13, bold=True, size_hint_y=None, height=dp(19)))
-        content.add_widget(label(
-            f"₱{amount:,}", 24, GREEN if profit else AMOUNT, bold=True,
+        self.amount = label(
+            "—", 24, GREEN if profit else AMOUNT, bold=True, shorten=True,
             size_hint_y=None, height=dp(29),
-        ))
+        )
+        content.add_widget(self.amount)
         self.add_widget(content)
         self.info_button = IconButton(
             "info", ORANGE, 16, size_hint=(None, None), size=(dp(44), dp(44)),
@@ -252,7 +253,12 @@ class MetricCard(FloatLayout):
 class SalesChart(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.series = []
         self.bind(pos=self._draw, size=self._draw)
+
+    def set_series(self, series):
+        self.series = series
+        self._draw()
 
     @staticmethod
     def _caption(text, x, y, centered=False):
@@ -264,28 +270,39 @@ class SalesChart(Widget):
 
     def _draw(self, *_):
         self.canvas.clear()
-        left, right = self.x + dp(25), self.right - dp(3)
+        left, right = self.x + dp(46), self.right - dp(10)
         bottom, top = self.y + dp(18), self.top - dp(9)
         if right <= left or top <= bottom:
             return
         height = top - bottom
-        slot = (right - left) / len(SAMPLE_SALES)
+        peak = max((amount for _, amount in self.series), default=0)
+        if not peak:
+            with self.canvas:
+                Color(*MUTED)
+                self._caption("No sales for this period.", self.center_x, self.center_y, centered=True)
+            return
+        ceiling = ((peak + 299) // 300) * 300
+        slot = (right - left) / len(self.series)
         bar_width = slot * .62
+        label_every = max(1, int(dp(44) / slot + .99))
         with self.canvas:
-            for index, tick in enumerate(("0", "1K", "2K", "3K")):
+            for index in range(4):
                 y = bottom + height * index / 3
                 Color(*BORDER)
                 Line(points=(left, y, right, y), width=dp(.65))
                 Color(*MUTED)
+                pesos = ceiling * index // 300
+                tick = f"{pesos / 1000:.1f}k" if pesos >= 1000 else str(pesos)
                 self._caption(tick, self.x, y)
-            for index, (hour, value) in enumerate(SAMPLE_SALES):
+            for index, (hour, value) in enumerate(self.series):
                 x = left + slot * (index + .5)
-                Color(*ORANGE)
-                RoundedRectangle(pos=(x - bar_width / 2, bottom),
-                                 size=(bar_width, height * value / 3000),
-                                 radius=[dp(3), dp(3), 0, 0])
-                Color(*INK)
-                self._caption(hour, x, self.y + dp(6), centered=True)
+                if value:
+                    Color(*ORANGE)
+                    Rectangle(pos=(x - bar_width / 2, bottom),
+                              size=(bar_width, height * value / ceiling))
+                if index % label_every == 0:
+                    Color(*INK)
+                    self._caption(hour, x, self.y + dp(6), centered=True)
 
 
 class NavigationTab(ButtonBehavior, BoxLayout):
@@ -303,7 +320,8 @@ def build_navigation(screen, active, show_message):
     navigation = BoxLayout(size_hint_y=None, height=dp(58))
     paint_surface(navigation, WHITE, border=BORDER)
     tabs = {}
-    routes = {"Home": "dashboard", "Sales": "sales", "Products": "products"}
+    routes = {"Home": "dashboard", "Sales": "sales", "Products": "products", "Utang": "utang",
+              "Reports": "reports"}
 
     def select(_, name):
         if name in routes:
@@ -463,9 +481,10 @@ class FinancialInfoBottomSheet(BottomSheet):
 
 
 class DashboardScreen(Screen):
-    def __init__(self, **kwargs):
+    def __init__(self, orders, **kwargs):
         super().__init__(**kwargs)
-        self.selected_date = date.today()
+        self.orders = orders
+        self.selected_date = datetime.now(PHILIPPINE_TIME).date()
         self.sheet = None
 
         shell = BoxLayout(orientation="vertical")
@@ -486,13 +505,13 @@ class DashboardScreen(Screen):
         self.date_button.bind(size=lambda widget, size: setattr(widget, "text_size", size))
         self.date_button.bind(on_release=self._open_date_selector)
         self.content.add_widget(self.date_button)
-        self._select_date(self.selected_date)
 
         self.metrics = GridLayout(cols=2, size_hint_y=None, spacing=dp(9),
                                   row_force_default=True)
         self.metrics.bind(minimum_height=self.metrics.setter("height"))
-        for metric in SAMPLE_METRICS:
-            self.metrics.add_widget(MetricCard(metric, self._show_metric))
+        self.metric_cards = {metric[0]: MetricCard(metric, self._show_metric) for metric in METRICS}
+        for card in self.metric_cards.values():
+            self.metrics.add_widget(card)
         self.content.add_widget(self.metrics)
 
         self.trend = BoxLayout(
@@ -500,7 +519,8 @@ class DashboardScreen(Screen):
         )
         paint_surface(self.trend, WHITE, radius=13, border=BORDER)
         self.trend.add_widget(label("Sales Trend", 16, bold=True, size_hint_y=None, height=dp(25)))
-        self.trend.add_widget(SalesChart())
+        self.chart = SalesChart()
+        self.trend.add_widget(self.chart)
         self.content.add_widget(self.trend)
 
         content_scroll.add_widget(self.content)
@@ -530,17 +550,38 @@ class DashboardScreen(Screen):
         self.trend.height = max(dp(130), min(dp(200), height * .26))
 
     def on_pre_enter(self, *_):
-        if self.selected_date == date.today() or self.date_button.text.startswith("Today"):
-            self._select_date(date.today())
+        today = datetime.now(PHILIPPINE_TIME).date()
+        try:
+            self.orders.initialize()
+        except (OSError, sqlite3.Error) as error:
+            Logger.warning("Dashboard: Could not initialize financial records: %s", error)
+        self._select_date(today if self.date_button.text.startswith("Today") or not self.date_button.text
+                          else self.selected_date)
 
     def _select_date(self, selected):
         self.selected_date = selected
-        prefix = "Today · " if selected == date.today() else ""
+        prefix = "Today · " if selected == datetime.now(PHILIPPINE_TIME).date() else ""
         self.date_button.text = f"{prefix}{selected:%b} {selected.day}, {selected.year}  v"
+        self.refresh_financials()
+
+    def refresh_financials(self):
+        date_in_manila = datetime.combine(self.selected_date, time.min, tzinfo=PHILIPPINE_TIME)
+        titles = ("Total Sales", "Cash Collected", "Unpaid Credit")
+        try:
+            bounds = history_bounds("Today", date_in_manila)
+            totals = self.orders.financial_totals(*bounds)
+            series = self.orders.sales_trend(*bounds, hourly=True)
+        except (OSError, sqlite3.Error) as error:
+            Logger.warning("Dashboard: Could not load financial totals: %s", error)
+            totals = (None,) * len(titles)
+            series = []
+        for title, value in zip(titles, totals):
+            self.metric_cards[title].amount.text = "—" if value is None else format_price(value)
+        self.chart.set_series(series)
 
     def _open_date_selector(self, button):
         menu = DropDown(auto_width=False, width=dp(175))
-        today = date.today()
+        today = datetime.now(PHILIPPINE_TIME).date()
         for title, selected in (("Today", today), ("Yesterday", today - timedelta(days=1))):
             option = Button(text=title, size_hint_y=None, height=dp(43))
             option.bind(on_release=lambda _, value=selected: menu.select(value))
@@ -549,7 +590,7 @@ class DashboardScreen(Screen):
         menu.open(button)
 
     def _show_metric(self, metric):
-        title, _, icon = metric
+        title, icon = metric
         self._open_sheet(FinancialInfoBottomSheet(title, icon, *METRIC_DETAILS[title]))
 
     def _show_sheet(self, title, message):

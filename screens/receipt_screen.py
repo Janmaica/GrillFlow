@@ -119,13 +119,22 @@ class _ReceiptPaper(BoxLayout):
         self.add_widget(_separator())
         for caption, amount in receipt.amounts():
             self.add_widget(_table_row(((caption, .61, "left"), (amount, .39, "right")), bold=True))
-        self._add_status(receipt.status)
-        if len(receipt.payments) > 1:
+        self._add_status(receipt.status, receipt.payment_label)
+        if receipt.arrangement_label:
+            self.add_widget(_table_row((
+                ("Payment Arrangement", .61, "left"), (receipt.arrangement_label, .39, "right"),
+            )))
+        is_credit = receipt.payment_arrangement == "credit"
+        if len(receipt.payments) > 1 or (is_credit and receipt.payments):
             self.add_widget(_separator())
             self.add_widget(wrapping_label("Payment History", 13, bold=True))
-            for payment in receipt.payments:
+            steps = receipt.payment_steps() if is_credit else [(payment, None) for payment in receipt.payments]
+            for payment, balance in steps:
+                details = f"{local_timestamp(payment.created_at)} · {format_price(payment.applied)} applied"
+                if balance is not None:
+                    details += f" · Balance: {format_price(balance)}"
                 self.add_widget(wrapping_label(
-                    f"{local_timestamp(payment.created_at)} · {format_price(payment.applied)} applied",
+                    details,
                     12, MUTED,
                 ))
         if receipt.remarks.strip():
@@ -139,12 +148,12 @@ class _ReceiptPaper(BoxLayout):
              (price, .24, "right"), (total, .26, "right")), bold=bold,
         ))
 
-    def _add_status(self, status):
+    def _add_status(self, status, caption):
         row = BoxLayout(size_hint_y=None, height=dp(29), spacing=dp(4))
         row.add_widget(label("Payment Status", 13, bold=True))
         fill, text_color = BADGES[status]
-        badge = label(status, 12, text_color, bold=True, align="center",
-                      size_hint_x=None, width=dp(110))
+        badge = label(caption, 12, text_color, bold=True, align="center",
+                      size_hint_x=None, width=dp(150 if caption == "Partially Paid (Credit)" else 110))
         paint_surface(badge, fill, radius=8)
         row.add_widget(badge)
         self.add_widget(row)
@@ -157,6 +166,7 @@ class ReceiptScreen(Screen):
         self.output = receipt_output(orders.products.data_dir, platform)
         self.receipt = None
         self.sheet = None
+        self.return_screen = "sales"
 
         shell = BoxLayout(orientation="vertical")
         paint_header_gradient(shell)
@@ -187,7 +197,8 @@ class ReceiptScreen(Screen):
         self.add_widget(shell)
         self.print_button.disabled = self.share_button.disabled = True
 
-    def open_order(self, order_id, *, saved_number=None):
+    def open_order(self, order_id, *, saved_number=None, return_screen="sales"):
+        self.return_screen = return_screen
         self.receipt = None
         self.paper.clear_widgets()
         try:
@@ -210,7 +221,7 @@ class ReceiptScreen(Screen):
     def _close(self, *_):
         if self.sheet:
             self.sheet.dismiss()
-        self.manager.current = "sales"
+        self.manager.current = self.return_screen
 
     def _print(self, *_):
         if self.receipt is not None:

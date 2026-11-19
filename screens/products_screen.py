@@ -11,7 +11,7 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 
 from product_photos import product_photo_path
-from product_store import format_price
+from product_store import ProductConflict, format_price, normalized_name
 from screens.add_product_screen import ProductImage
 from screens.dashboard_screen import (
     AMOUNT,
@@ -30,6 +30,7 @@ from screens.dashboard_screen import (
     paint_surface,
     wrapping_label,
 )
+from screens.splash_screen import _RoundedButton
 
 
 class _AddProductButton(ButtonBehavior, BoxLayout):
@@ -47,6 +48,7 @@ class ProductsScreen(Screen):
         self.sheet = None
         self.products = []
         self.load_failed = False
+        self.reported_duplicates = []
         shell = BoxLayout(orientation="vertical")
         paint_surface(shell, CREAM)
         shell.add_widget(self._build_header())
@@ -117,20 +119,47 @@ class ProductsScreen(Screen):
         self.manager.current = "dashboard"
 
     def _open_add_product(self, *_):
+        self.manager.get_screen("add_product").editing = None
+        self.manager.current = "add_product"
+
+    def _edit_product(self, product):
+        self.manager.get_screen("add_product").editing = product
         self.manager.current = "add_product"
 
     def on_pre_enter(self, *_):
         try:
             self.store.initialize()
+        except (OSError, sqlite3.Error) as error:
+            Logger.warning("Products: Could not initialize catalog: %s", error)
+            self.load_failed = True
+            self._render_products()
+            return
+        self._refresh_products()
+
+    def _refresh_products(self):
+        try:
             self.products = self.store.list_products()
+            duplicates = self.store.duplicate_names()
             self.load_failed = False
         except (OSError, sqlite3.Error) as error:
             Logger.warning("Products: Could not load products: %s", error)
             self.load_failed = True
+            duplicates = self.reported_duplicates
         self._render_products()
+        if duplicates != self.reported_duplicates:
+            self.reported_duplicates = duplicates
+            if duplicates:
+                names = "\n".join(f"{name} ({count} records)" for name, count in duplicates)
+                self._show_sheet(
+                    "Duplicate Products",
+                    f"{names}\n\nExisting records are preserved. Rename active duplicates individually "
+                    "after reviewing their stock and order history.",
+                )
 
     def on_pre_leave(self, *_):
         self.search_input.focus = False
+        if self.sheet:
+            self.sheet.dismiss()
         self.hide_notice.cancel()
         self._hide_notice()
 
@@ -154,8 +183,8 @@ class ProductsScreen(Screen):
             self.results.add_widget(self._build_empty_state())
             return
 
-        query = self.search_input.text.strip().casefold()
-        matches = [product for product in self.products if query in product["name"].casefold()]
+        query = normalized_name(self.search_input.text)
+        matches = [product for product in self.products if query in normalized_name(product["name"])]
         if not matches:
             self.results.add_widget(self._build_empty_state(
                 "No Matching Products", "Try a different product name.",
@@ -183,7 +212,8 @@ class ProductsScreen(Screen):
         details = BoxLayout(orientation="vertical", spacing=dp(2))
         details.add_widget(wrapping_label(product["name"], 15, bold=True))
         details.add_widget(wrapping_label(f"Price: {format_price(product['selling_price'])}", 13))
-        details.add_widget(wrapping_label(f"Stock: {product['stock']} · {product['unit']}", 13))
+        stock = f"Stock: {product['stock']}" if product["stock"] else "Out of Stock"
+        details.add_widget(wrapping_label(f"{stock} · {product['unit']}", 13))
 
         def fit_row(_, height):
             row.height = max(dp(78), height + dp(16))
@@ -191,16 +221,49 @@ class ProductsScreen(Screen):
         details.bind(minimum_height=fit_row)
         fit_row(details, details.minimum_height)
         row.add_widget(details)
-        for icon, title, color in (("edit", "Edit Product", ORANGE), ("delete", "Delete Product", AMOUNT)):
+        for icon, action, color in (
+            ("edit", self._edit_product, ORANGE), ("delete", self._confirm_delete, AMOUNT),
+        ):
             button = IconButton(icon, color, 18, size_hint_x=None, width=dp(44))
-            button.bind(on_release=lambda _, title=title: self._show_sheet(title, "Coming Soon"))
+            button.bind(on_release=lambda _, action=action: action(product))
             row.add_widget(button)
         return row
 
+    def _confirm_delete(self, product):
+        sheet = self._show_sheet(
+            "Permanently Delete?",
+            "This action will permanently remove the selected record from GrillFlow. "
+            f"It cannot be undone.\n\nProduct: {product['name']}",
+            confirmation="Cancel",
+        )
+        delete = _RoundedButton(text="Delete Permanently", size_hint_y=None, height=dp(44))
+        sheet.copy.add_widget(delete)
 
-    def _show_sheet(self, title, message):
+        def submit(*_):
+            if delete.disabled or sheet.parent is None:
+                return
+            delete.disabled = sheet.confirm_button.disabled = True
+            try:
+                self.store.delete(product["id"])
+            except ProductConflict as error:
+                self._refresh_products()
+                self._show_sheet("Delete Product", str(error))
+            except (OSError, sqlite3.Error) as error:
+                Logger.warning("Products: Could not delete product: %s", error)
+                self._show_sheet("Delete Product", "Could not delete the product. Try again.")
+            else:
+                sheet.dismiss()
+                self._refresh_products()
+                self.notice.text = "Product permanently deleted."
+                self.notice.height = dp(32)
+                self.hide_notice()
+
+        delete.bind(on_release=submit)
+
+    def _show_sheet(self, title, message, *, confirmation="Close"):
         self.search_input.focus = False
         if self.sheet and self.sheet.parent:
             self.sheet.dismiss()
-        self.sheet = BottomSheet(title, message)
+        self.sheet = BottomSheet(title, message, confirmation=confirmation)
         self.add_widget(self.sheet)
+        return self.sheet

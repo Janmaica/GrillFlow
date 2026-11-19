@@ -10,8 +10,9 @@ from kivy.uix.button import Button
 from kivy.uix.screenmanager import Screen
 from kivy.uix.scrollview import ScrollView
 
-from order_store import CREDIT, PAID, PARTIAL, parse_payment_amount
+from order_store import CREDIT, PAID, PARTIAL, can_move_to_credit, customer_name, parse_payment_amount
 from product_store import format_price
+from receipt_data import display_payment_status
 from screens.dashboard_screen import (
     AMOUNT, BORDER, CREAM, INK, MUTED, ORANGE, WHITE, BottomSheet, Icon, IconButton,
     build_navigation, label, paint_header_gradient, paint_surface, wrapping_label,
@@ -33,7 +34,7 @@ PAYMENT_PILLS = {PAID: GREEN_PILL, PARTIAL: ORANGE_PILL, CREDIT: RED_PILL}
 class OrderSummary:
     active: int = 0
     ready: int = 0
-    unpaid: int = 0
+    customers_with_utang: int = 0
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,7 @@ class OrderPreview:
     preparation_status: str
     saved_id: int | None = None
     payment_status: str = CREDIT
+    payment_arrangement: str | None = None
 
     @property
     def order_status(self):
@@ -100,13 +102,17 @@ class OrderCard(ButtonBehavior, BoxLayout):
         paint_surface(self, WHITE, radius=12, border=BORDER)
         details = BoxLayout(spacing=dp(8))
         customer = BoxLayout(orientation="vertical")
-        customer.add_widget(label(order.order_id, 16, bold=True, shorten=True))
-        customer.add_widget(label(order.customer_name, 14, shorten=True))
+        customer.add_widget(label(order.customer_name, 17, bold=True, shorten=True))
+        customer.add_widget(label(order.order_id, 12, MUTED, shorten=True))
         details.add_widget(customer)
-        details.add_widget(label(format_price(order.total_centavos), 15, bold=True,
-                                 align="right", shorten=True, size_hint_x=.74))
-        self.receipt_button = IconButton("chevron", ORANGE, 20, size_hint_x=None, width=dp(44))
-        details.add_widget(self.receipt_button)
+        amount = AnchorLayout(anchor_y="top", size_hint_x=.74)
+        amount.add_widget(label(format_price(order.total_centavos), 15, bold=True,
+                                align="right", shorten=True, size_hint_y=None, height=dp(22)))
+        details.add_widget(amount)
+        arrow = AnchorLayout(anchor_y="top", size_hint_x=None, width=dp(36))
+        self.receipt_button = IconButton("chevron", ORANGE, 18, size_hint_y=None, height=dp(34))
+        arrow.add_widget(self.receipt_button)
+        details.add_widget(arrow)
         self.add_widget(details)
 
         statuses = BoxLayout(size_hint_y=None, height=dp(59), spacing=dp(8))
@@ -115,7 +121,8 @@ class OrderCard(ButtonBehavior, BoxLayout):
             statuses, "Order Status", order.order_status, preparation_colors,
         )
         self.payment_selector = self._status_control(
-            statuses, "Payment Status", order.payment_status, PAYMENT_PILLS[order.payment_status],
+            statuses, "Payment Status", display_payment_status(order.payment_status, order.payment_arrangement),
+            PAYMENT_PILLS[order.payment_status],
         )
         self.add_widget(statuses)
 
@@ -151,7 +158,7 @@ class SalesScreen(Screen):
         self.summary_rows = {
             "active": _SummaryRow("Active Orders", "receipt", ACTIVE_ORANGE),
             "ready": _SummaryRow("Ready for Pickup", "box", PICKUP_GREEN),
-            "unpaid": _SummaryRow("With Unpaid Balance", "credit", UNPAID_RED, icon_color=UNPAID_RED),
+            "customers_with_utang": _SummaryRow("Customers With Utang", "credit", UNPAID_RED, icon_color=UNPAID_RED),
         }
         for row in self.summary_rows.values():
             content.add_widget(row)
@@ -180,9 +187,9 @@ class SalesScreen(Screen):
     def _build_quick_actions(self):
         actions = BoxLayout(size_hint_y=None, height=dp(109), spacing=dp(10))
         self.new_order = _QuickAction("New Order", "(Create a Sale)", "plus", primary=True)
-        self.order_history = _QuickAction("Order History", "(Completed Orders)", "receipt")
+        self.order_history = _QuickAction("Order History", "(Saved Orders)", "receipt")
         self.new_order.bind(on_release=self._open_new_order)
-        self.order_history.bind(on_release=lambda *_: self._show_sheet("Order History", "Coming Soon"))
+        self.order_history.bind(on_release=self._open_history)
         actions.add_widget(self.new_order)
         actions.add_widget(self.order_history)
         return actions
@@ -195,7 +202,7 @@ class SalesScreen(Screen):
             background_normal="", background_down="", background_color=(0, 0, 0, 0),
             size_hint_x=None, width=dp(82),
         )
-        self.view_all.bind(on_release=lambda *_: self._show_sheet("Order History", "Coming Soon"))
+        self.view_all.bind(on_release=self._open_history)
         header.add_widget(self.view_all)
         return header
 
@@ -261,20 +268,76 @@ class SalesScreen(Screen):
         self._refresh_orders()
 
     def _select_payment(self, order):
+        self.open_payment(order.saved_id, order.order_id)
+
+    def open_payment(self, order_id, order_number, *, host=None):
+        host = host or self
         try:
-            receipt = self.orders.get_receipt(order.saved_id)
+            receipt = self.orders.get_receipt(order_id)
         except (OSError, sqlite3.Error) as error:
             Logger.warning("Sales: Could not load payment history: %s", error)
             receipt = None
         if receipt is None:
-            self._show_sheet("Payment Status", "Could not load payment history. Try again.")
+            host._show_sheet("Payment Status", "Could not load payment history. Try again.")
             return
-        sheet = self._show_sheet(
-            "Payment Status", f"{order.order_id} · Remaining: {format_price(receipt.balance)}",
+        sheet = host._show_sheet(
+            "Payment Status",
+            f"{order_number} · {receipt.payment_label}\nRemaining: {format_price(receipt.balance)}",
         )
         for status in (PAID, PARTIAL, CREDIT):
-            self._sheet_option(sheet, status, receipt.status,
-                               lambda status=status: self._payment_choice(order.saved_id, receipt, status))
+            self._sheet_option(sheet, status, receipt.payment_label,
+                               lambda status=status: self._payment_choice(order_id, receipt, status, host))
+        if can_move_to_credit(receipt.payment_arrangement, receipt.applied, receipt.total):
+            self._sheet_option(sheet, "Move to Credit (Utang)", None,
+                               lambda: self._confirm_credit_transfer(order_id, receipt, host))
+
+    def _confirm_credit_transfer(self, order_id, receipt, host):
+        sheet = host._show_sheet(
+            "Move to Credit (Utang)?",
+            f"Customer: {receipt.customer_name}\nOrder: {receipt.order_number}\n"
+            f"Original Total: {format_price(receipt.total)}\n"
+            f"Already Paid: {format_price(receipt.applied)}\n"
+            f"Remaining Balance: {format_price(receipt.balance)}\n\n"
+            "The remaining balance will be transferred to the customer's Utang account. "
+            "Previous payments will be preserved.",
+            confirmation="Cancel",
+        )
+        name_input = None
+        if not customer_name(receipt.customer_name):
+            sheet.copy.add_widget(wrapping_label("Enter the customer's real name.", 14))
+            field, name_input = _text_field("Customer name")
+            sheet.copy.add_widget(field)
+        error = wrapping_label("", 13, AMOUNT)
+        error.height = 0
+        sheet.copy.add_widget(error)
+        confirm = _Action("Confirm Transfer", primary=True, size_hint_y=None, height=dp(44))
+        sheet.copy.add_widget(confirm)
+
+        def submit(*_):
+            if confirm.disabled or sheet.parent is None:
+                return
+            confirm.disabled = True
+            try:
+                self.orders.move_to_credit(
+                    order_id, expected_paid=receipt.applied,
+                    replacement_customer=name_input.text if name_input is not None else "",
+                )
+            except ValueError as failure:
+                error.text = str(failure)
+            except (OSError, sqlite3.Error) as failure:
+                Logger.warning("Sales: Could not move order to credit: %s", failure)
+                error.text = "Could not move the order to Utang. Try again."
+            else:
+                if name_input is not None:
+                    name_input.focus = False
+                sheet.dismiss()
+                self._refresh_orders()
+                self.manager.get_screen("order_history")._refresh()
+                self.manager.get_screen("utang")._refresh()
+                return
+            confirm.disabled = False
+
+        confirm.bind(on_release=submit)
 
     @staticmethod
     def _sheet_option(sheet, status, current, action):
@@ -283,16 +346,16 @@ class SalesScreen(Screen):
         button.bind(on_release=lambda *_: action())
         sheet.copy.add_widget(button)
 
-    def _payment_choice(self, order_id, receipt, status):
+    def _payment_choice(self, order_id, receipt, status, host):
         if status == CREDIT or not receipt.balance:
             if status == receipt.status:
-                self.sheet.dismiss()
+                host.sheet.dismiss()
             else:
-                self._show_sheet("Payment Status",
+                host._show_sheet("Payment Status",
                                  "A payment has already been recorded. Refunds and reversals are unavailable.")
             return
 
-        sheet = self._show_sheet(
+        sheet = host._show_sheet(
             "Record Payment",
             f"{receipt.order_number}\nAlready paid: {format_price(receipt.applied)}"
             f"\nRemaining: {format_price(receipt.balance)}",
@@ -326,6 +389,8 @@ class SalesScreen(Screen):
             else:
                 sheet.dismiss()
                 self._refresh_orders()
+                if host is not self:
+                    host._refresh()
                 return
             save.disabled = False
 
@@ -340,9 +405,12 @@ class SalesScreen(Screen):
     def _open_new_order(self, *_):
         self.manager.current = "new_order"
 
-    def _show_sheet(self, title, message):
+    def _open_history(self, *_):
+        self.manager.current = "order_history"
+
+    def _show_sheet(self, title, message, *, confirmation="Close"):
         if self.sheet and self.sheet.parent:
             self.sheet.dismiss()
-        self.sheet = BottomSheet(title, message)
+        self.sheet = BottomSheet(title, message, confirmation=confirmation)
         self.add_widget(self.sheet)
         return self.sheet

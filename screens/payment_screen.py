@@ -11,7 +11,9 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 
 from order_draft import OrderDraft
-from order_store import CREDIT, PAID, PARTIAL, allocate_payment, customer_name, parse_payment_amount
+from order_store import (
+    CREDIT, PAID, PARTIAL, PAY_LATER, allocate_payment, customer_name, format_customer_name, parse_payment_amount,
+)
 from product_store import format_price
 from screens.dashboard_screen import (
     AMOUNT, BORDER, CREAM, INK, MUTED, ORANGE, WHITE, IconButton, label,
@@ -75,7 +77,10 @@ class PaymentScreen(Screen):
         card = _card()
         card.add_widget(wrapping_label("Payment", 17, bold=True))
         self.payment_options = {}
-        for mode, caption in ((PAID, "Paid"), (PARTIAL, "Partial Payment"), (CREDIT, "Utang (Credit)")):
+        for mode, caption in (
+            (PAID, "Paid"), (PARTIAL, "Partial Payment"), (PAY_LATER, "Unpaid (Pay Later)"),
+            (CREDIT, "Utang (Credit)"),
+        ):
             row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(4))
             holder = AnchorLayout(size_hint_x=None, width=dp(44))
             checkbox = CheckBox(
@@ -122,7 +127,7 @@ class PaymentScreen(Screen):
     def prepare(self, draft, customer, photo_source):
         order_number, guest_name = self.orders.preview()
         self.draft.lines = draft.lines.copy()
-        self.customer = customer_name(customer)
+        self.customer = format_customer_name(customer_name(customer))
         self.details.clear_widgets()
         self.details.add_widget(wrapping_label("Order Details", 17, bold=True))
         self.details.add_widget(wrapping_label(f"{order_number} · Preview", 16, AMOUNT, bold=True))
@@ -151,13 +156,17 @@ class PaymentScreen(Screen):
     def _select_mode(self, mode):
         self.mode = mode
         self.amount_input.focus = False
-        self.amount_input.disabled = mode == CREDIT
+        zero_payment = mode in (CREDIT, PAY_LATER)
+        self.amount_input.disabled = zero_payment
         if mode == PAID:
             pesos, cents = divmod(self.draft.total, 100)
             self.amount_input.text = f"{pesos}.{cents:02d}"
         else:
-            self.amount_input.text = "0.00" if mode == CREDIT else ""
+            self.amount_input.text = "0.00" if zero_payment else ""
         self._update_amounts()
+
+    def _payment_terms(self):
+        return (CREDIT, PAY_LATER) if self.mode == PAY_LATER else (self.mode, None)
 
     def _update_amounts(self, *_):
         if hasattr(self, "status"):
@@ -166,7 +175,10 @@ class PaymentScreen(Screen):
         change, remaining = 0, self.draft.total if self.mode != PAID else 0
         try:
             tendered = parse_payment_amount(self.amount_input.text)
-            payment = allocate_payment(self.mode, self.draft.total, tendered, self.customer)
+            status, arrangement = self._payment_terms()
+            payment = allocate_payment(
+                status, self.draft.total, tendered, self.customer, arrangement=arrangement,
+            )
         except ValueError:
             pass
         else:
@@ -200,8 +212,10 @@ class PaymentScreen(Screen):
             if not self.draft.lines:
                 raise ValueError("Add at least one product before saving.")
             tendered = parse_payment_amount(self.amount_input.text)
+            status, arrangement = self._payment_terms()
             order = self.orders.save_order(
-                self.draft, self.customer, self.mode, tendered, self.remarks_input.text,
+                self.draft, self.customer, status, tendered, self.remarks_input.text,
+                arrangement=arrangement,
             )
         except ValueError as error:
             self.status.text = str(error)

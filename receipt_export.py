@@ -30,8 +30,17 @@ def printable_html(receipt):
         f"<dt>{escape(caption)}</dt><dd>{escape(amount)}</dd>"
         for caption, amount in receipt.amounts()
     )
+    arrangement = (
+        f"<dt>Payment Arrangement</dt><dd>{escape(receipt.arrangement_label)}</dd>"
+        if receipt.arrangement_label else ""
+    )
     history = ""
-    if len(receipt.payments) > 1:
+    if receipt.payment_arrangement == "credit" and receipt.payments:
+        history = "<h2>Payment History</h2><ul>" + "".join(
+            f"<li>{escape(local_timestamp(payment.created_at))} · {format_price(payment.applied)} applied"
+            f" · Balance: {format_price(balance)}</li>" for payment, balance in receipt.payment_steps()
+        ) + "</ul>"
+    elif len(receipt.payments) > 1:
         history = "<h2>Payment History</h2><ul>" + "".join(
             f"<li>{escape(local_timestamp(payment.created_at))} · "
             f"{format_price(payment.applied)} applied</li>"
@@ -68,7 +77,7 @@ Customer: {escape(receipt.customer_name)}<br>
 {escape(local_timestamp(receipt.created_at))}</p>
 <table><thead><tr><th>Item</th><th>Qty</th><th>Price</th><th>Total</th></tr></thead>
 <tbody>{items}</tbody></table>
-<dl>{totals}<dt>Payment Status</dt><dd>{escape(receipt.status)}</dd></dl>
+<dl>{totals}<dt>Payment Status</dt><dd>{escape(receipt.payment_label)}</dd>{arrangement}</dl>
 {history}{remarks}<footer>{RECEIPT_FOOTER}</footer></body></html>"""
 
 

@@ -13,8 +13,12 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.spinner import Spinner, SpinnerOption
 from kivy.uix.textinput import TextInput
 
-from product_photos import DEFAULT_PHOTO, IMAGE_EXTENSIONS, PhotoPickerError, create_photo_picker, import_photo
-from product_store import UNITS, format_product_name, validate_product
+from product_photos import (
+    DEFAULT_PHOTO, IMAGE_EXTENSIONS, PhotoPickerError, create_photo_picker, import_photo, product_photo_path,
+)
+from product_store import (
+    DUPLICATE_PRODUCT_MESSAGE, UNITS, ProductConflict, format_product_name, normalized_name, validate_product,
+)
 from screens.dashboard_screen import (
     AMOUNT, BORDER, CREAM, INK, MUTED, ORANGE, WHITE, BottomSheet, IconButton,
     label, paint_header_gradient, paint_surface, wrapping_label,
@@ -56,6 +60,8 @@ class AddProductScreen(Screen):
         self.store = store
         self.photo_picker = create_photo_picker()
         self.selected_photo = None
+        self.existing_image_path = None
+        self.editing = None
         self.photo_sheet = None
         self.saving = False
 
@@ -67,7 +73,8 @@ class AddProductScreen(Screen):
         self.back_button = IconButton("back", WHITE, 22, size_hint_x=None, width=dp(44))
         self.back_button.bind(on_release=self._go_back)
         header.add_widget(self.back_button)
-        header.add_widget(label("Add Product", 23, WHITE, bold=True))
+        self.heading = label("Add Product", 23, WHITE, bold=True)
+        header.add_widget(self.heading)
         shell.add_widget(header)
 
         panel = BoxLayout(padding=(dp(8), 0))
@@ -77,10 +84,10 @@ class AddProductScreen(Screen):
                          padding=(dp(12), dp(14), dp(12), dp(15)))
         form.bind(minimum_height=form.setter("height"))
         form.add_widget(self._build_photo())
-        self.name_input = self._add_input(form, "Product Name", "Enter product name")
+        self.name_input, _ = self._add_input(form, "Product Name", "Enter product name")
         self.name_input.bind(focus=self._format_name_on_blur)
-        self.price_input = self._add_input(form, "Selling Price (₱)", "0.00")
-        self.stock_input = self._add_input(form, "Initial Stock", "0")
+        self.price_input, _ = self._add_input(form, "Selling Price (₱)", "0.00")
+        self.stock_input, self.stock_caption = self._add_input(form, "Initial Stock", "0")
         form.add_widget(label("Unit", 14, bold=True, size_hint_y=None, height=dp(20)))
         self.unit_input = Spinner(
             text=UNITS[0], values=UNITS, option_cls=_UnitOption, color=INK,
@@ -127,7 +134,8 @@ class AddProductScreen(Screen):
 
     @staticmethod
     def _add_input(form, caption, hint):
-        form.add_widget(label(caption, 14, bold=True, size_hint_y=None, height=dp(20)))
+        heading = label(caption, 14, bold=True, size_hint_y=None, height=dp(20))
+        form.add_widget(heading)
         container = BoxLayout(size_hint_y=None, height=dp(43))
         paint_surface(container, WHITE, radius=9, border=BORDER)
         field = TextInput(
@@ -138,7 +146,7 @@ class AddProductScreen(Screen):
         )
         container.add_widget(field)
         form.add_widget(container)
-        return field
+        return field, heading
 
     def on_pre_enter(self, *_):
         self.saving = False
@@ -147,11 +155,29 @@ class AddProductScreen(Screen):
             field.text = ""
         self.unit_input.text = UNITS[0]
         self._use_default_photo()
+        product = self.editing
+        self.heading.text = "Edit Product" if product else "Add Product"
+        self.stock_caption.text = "Current Stock" if product else "Initial Stock"
+        if product:
+            self.name_input.text = product["name"]
+            pesos, cents = divmod(product["selling_price"], 100)
+            self.price_input.text = f"{pesos}.{cents:02d}"
+            self.stock_input.text = str(product["stock"])
+            self.unit_input.text = product["unit"]
+            self.existing_image_path = product["image_path"]
+            source = product_photo_path(self.store.data_dir, self.existing_image_path)
+            if source != DEFAULT_PHOTO:
+                try:
+                    if CoreImage(str(source), nocache=True).texture:
+                        self.preview.source = str(source)
+                except Exception:
+                    Logger.warning("Products: Existing photo is unreadable; showing default")
 
     def on_pre_leave(self, *_):
         self._clear_focus()
         if self.photo_sheet:
             self.photo_sheet.dismiss()
+        self.editing = None
 
     def _format_name_on_blur(self, field, focused):
         if not focused:
@@ -207,6 +233,7 @@ class AddProductScreen(Screen):
 
     def _use_default_photo(self):
         self.selected_photo = None
+        self.existing_image_path = None
         self.preview.source = str(DEFAULT_PHOTO)
         self.status.text = ""
 
@@ -225,22 +252,34 @@ class AddProductScreen(Screen):
         self.save_button.disabled = True
         imported = None
         try:
+            product = self.editing
+            unchanged_key = product and normalized_name(product["name"]) == normalized_name(fields.name)
+            if not unchanged_key and self.store.name_exists(fields.name, product["id"] if product else None):
+                raise ProductConflict(DUPLICATE_PRODUCT_MESSAGE)
             if self.selected_photo:
                 imported = import_photo(self.selected_photo, self.store.data_dir)
-            self.store.add(fields, imported.name if imported else None)
-        except (OSError, sqlite3.Error) as error:
-            Logger.warning("Products: Could not save product: %s", error)
+            image_path = imported.name if imported else self.existing_image_path
+            if product:
+                self.store.update(product, fields, image_path)
+            else:
+                self.store.add(fields, image_path)
+        except (OSError, sqlite3.Error, ProductConflict) as error:
             if imported:
                 try:
                     imported.unlink(missing_ok=True)
                 except OSError:
                     Logger.warning("Products: Could not remove unsaved photo")
-            self.status.text = "Could not save the product. Check storage access and try again."
+            if isinstance(error, ProductConflict) or str(error) == DUPLICATE_PRODUCT_MESSAGE:
+                self.status.text = str(error)
+            else:
+                Logger.warning("Products: Could not save product: %s", error)
+                self.status.text = "Could not save the product. Check storage access and try again."
             self.saving = False
             self.save_button.disabled = False
             return
 
         products = self.manager.get_screen("products")
-        products.search_input.text = ""
+        if not product:
+            products.search_input.text = ""
         self._go_back()
         products.show_saved()

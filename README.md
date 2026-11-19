@@ -141,6 +141,18 @@ python main.py
 
 **Note:** The current version is a Windows-tested Kivy prototype. Android APK packaging has not yet been completed.
 
+## Permanent deletion
+
+Confirmed deletion of a fully paid order removes the sale, its line items, its
+payment history, and its credit-transfer audit entry. Its revenue and payments
+are removed from Dashboard and Reports totals. Stock is not restored. Clear
+History applies these rules only to visible orders in the selected period and
+is blocked if any selected order has an outstanding balance.
+
+Retained orders protect their referenced products from deletion. An unused
+product can be permanently deleted, and its name becomes available for reuse.
+Previously archived records are retained.
+
 ## Project Goals
 
 GrillFlow aims to simplify everyday barbecue business management by providing offline access to sales records, order preparation, customer credit, receipts, expenses, family consumption, and understandable financial summaries.

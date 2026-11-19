@@ -81,6 +81,6 @@ class ReceiptTests(unittest.TestCase):
         self.assertIn("SALES RECEIPT", text)
         self.assertIn("Print / Save as PDF", text)
         self.assertIn("Skewer &lt;special&gt;", text)
-        self.assertIn("Ana &amp; Co", text)
+        self.assertIn("Ana &amp; co", text)
         self.assertIn("Use &lt;paper&gt;", text)
         self.assertNotIn(other.order_number, text)
