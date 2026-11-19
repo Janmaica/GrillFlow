@@ -142,3 +142,13 @@ class ReportTests(unittest.TestCase):
         (printed,) = (self.directory / "reports").glob("*.html")
         browser.assert_called_once_with(printed.resolve().as_uri())
         self.assertIn("&lt;unsafe&gt;", printed.read_text(encoding="utf-8"))
+
+    def test_android_writes_csv_without_opening_a_private_file_uri(self):
+        with patch("report_output.webbrowser.open") as browser:
+            message = write_report(self.directory, [("Sale", 100)], platform="android")
+            self.assertIn("private storage", message)
+            message = write_report(self.directory, [("Sale", 100)], print_report=True, platform="android")
+            self.assertIn("Android report printing is not available", message)
+        browser.assert_not_called()
+        (report,) = (self.directory / "reports").iterdir()
+        self.assertEqual(report.suffix, ".csv")

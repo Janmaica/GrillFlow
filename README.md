@@ -8,15 +8,15 @@ The application aims to provide a simple, user-friendly interface with understan
 
 ## Project Status
 
-**In Development — Stage 2: Owner Login UI**
+**In Development**
 
-The Kivy application includes the GrillFlow splash screen and Owner Login interface. Login input validation is UI-only; secure owner authentication and fingerprint sign-in are not implemented.
+GrillFlow uses Firebase email/password authentication for owner access and keeps business records in local SQLite databases.
 
 ## Technologies
 
 - **Python 3.11** — Primary programming language
 - **Kivy 2.3.2** — Cross-platform UI framework
-- **SQLite** — Planned offline database
+- **SQLite** — Offline business database
 - **Git & GitHub** — Version control
 - **VS Code** — Development environment
 
@@ -128,18 +128,106 @@ Activate it on Windows:
 Install Kivy:
 
 ```bash
-python -m pip install kivy==2.3.2
+python -m pip install -r requirements.txt
 ```
 
-Run the application:
+In the GrillFlow Firebase project, enable **Authentication → Sign-in method → Email/Password**. Place the Firebase Android configuration in the project root as `google-services (3).json`. GrillFlow reads the project ID and API key from that file. Check the Email Verification and Password Reset templates in **Authentication → Templates**.
 
-```bash
+The offline-access setting is optional.
+
+```powershell
+$env:GRILLFLOW_OFFLINE_HOURS = "72"
 python main.py
 ```
 
-**Get Started** opens the Owner Login screen, and **Back** returns to the splash screen. The Login button validates empty fields but does not authenticate or navigate onward; fingerprint sign-in displays a Coming Soon message. The desktop preview opens at 400 × 750 pixels.
+**Get Started** opens Login or resumes a valid owner session. Sign Up creates
+the Firebase account and sends an email verification link. **Forgot Password?**
+requests a Firebase reset link. **Log Out** in **My Profile** removes the
+saved sign-in credential and preserves the account's business data.
 
-**Note:** The current version is a Windows-tested Kivy prototype. Android APK packaging has not yet been completed.
+An initial sign-in requires internet access and a verified email. Subsequent
+launches refresh the token and verify the account with Firebase. During a network
+outage, GrillFlow can reopen a previously verified session for up to 72 hours
+from the last successful online check. Configure 0–168 hours with
+`GRILLFLOW_OFFLINE_HOURS`. Zero disables offline access. Offline access depends
+on the device clock, and Firebase revocation cannot be checked without a connection.
+Windows uses current-user DPAPI. Android builds require API 23 or later, PyJNIus,
+the INTERNET permission, and the Firebase JSON file included in the application package.
+Android uses an AES-GCM key held by Android Keystore.
+
+**My Profile** in the Dashboard menu shows your Firebase name, email, and
+verification status. You can update your name online and request a password-reset
+link for your account. During offline access, the profile shows the last
+securely cached account information. Profile photos are resized on import,
+stored in each account's local folder, and stay on the device. The Windows
+file picker supports JPG, JPEG, and PNG. Android gallery selection is pending.
+
+### Local account data
+
+GrillFlow derives each account folder from the Firebase project ID and UID. The
+SQLite database, product photos, exports, and reset backups stay in that account's
+folder. Local SQLite data does not synchronize between devices. The old shared
+`grillflow.sqlite3` stays in the original app-data folder.
+
+For a manual legacy transfer, first sign in to the intended owner account so its
+folder exists, and confirm its exact UID in Firebase Authentication. With
+GrillFlow closed, make a verified SQLite backup of the legacy database and copy
+its `product_photos` folder to the backup location. Confirm the target directory
+by calling `firebase_auth.account_directory` with the app-data folder, Firebase
+project ID, and confirmed UID. After the owner explicitly approves the transfer,
+proceed only with a fresh account with no business records. Back up the target
+folder, then place a copy of the verified legacy backup at
+`grillflow.sqlite3` in that target and copy the matching product photos. Keep the
+legacy database and both backups intact. Open GrillFlow and check the records
+under that account. This procedure is for the device operator.
+
+## Android debug build from Windows
+
+The [Buildozer configuration](buildozer.spec) builds **GrillFlow** as
+`com.grillflow.app` for ARM64 phones running Android 6.0 or later. It uses the
+existing logo and splash background, Kivy's bundled fonts, Python 3.11.9,
+Kivy 2.3.2, the Android Pillow recipe, PyJNIus, SQLite, and OpenSSL. Its
+source allowlist includes the root `google-services (3).json` file and the app's
+runtime code and artwork. Live databases, profile and product photos,
+session files, exports, backups, and development files are outside the allowlist.
+
+1. Set up Ubuntu under WSL2 and install Buildozer and its Android prerequisites
+   inside Ubuntu. Use a Linux virtual environment separate from the Windows
+   `.venv`. Follow the [Buildozer installation and WSL guide](https://buildozer.readthedocs.io/en/latest/installation/).
+2. Copy the current project sources, assets, spec, and the Firebase JSON into a
+   folder under your WSL home directory. Keep the filename, including its spaces
+   and parentheses. Run the build from that Linux folder.
+
+   ```sh
+   buildozer -v android debug
+   ```
+
+3. Copy the APK from `bin/` to a Windows folder. With USB debugging enabled,
+   install it using Windows Android Platform Tools.
+
+   ```powershell
+   adb devices
+   adb install -r "C:\path\to\grillflow-debug.apk"
+   ```
+
+   Use the actual filename produced by Buildozer. If Android reports a signing
+   mismatch with an existing install, stop and verify the signing key first.
+   Uninstalling the existing app removes its local data.
+
+The Android app continues to use the [Firebase Authentication REST APIs](https://firebase.google.com/docs/reference/rest/auth).
+The bundled JSON supplies the API key and project ID for the matching Android
+client. The APK requests INTERNET permission and sends its installed package
+and signing certificate fingerprint on Firebase requests. If the API key has
+Android application restrictions, allow this package and the **actual debug
+APK's SHA-1** in Google Cloud. The Google Services Gradle plugin and native
+Firebase SDK are unused. [Google Cloud API key restrictions](https://docs.cloud.google.com/docs/authentication/api-keys#android-apps)
+
+On Android, SQLite, photos, and exports are written to the account-specific
+folder under the app's private files directory. Refresh credentials remain
+protected by Android Keystore, and the manifest disables app auto backup.
+The Android photo picker and native receipt printing and sharing are pending.
+Reports can save CSV files in private app storage. Opening or sharing those
+files with another Android app and native report printing are pending.
 
 ## Financial history
 

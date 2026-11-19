@@ -1,6 +1,7 @@
 
 from pathlib import Path
 
+from kivy.app import App
 from kivy.graphics import Color, Rectangle, RoundedRectangle
 from kivy.metrics import dp, sp
 from kivy.uix.anchorlayout import AnchorLayout
@@ -293,4 +294,4 @@ class SplashScreen(_BackdropScreen):
                 "Splash screen must be attached to a ScreenManager"
             )
 
-        self.manager.current = "login"
+        App.get_running_app().continue_from_splash()

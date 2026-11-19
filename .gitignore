@@ -32,6 +32,9 @@ venv.bak/
 .env.*
 !.env.example
 .envrc
+google-services*.json
+service-account*.json
+firebase-adminsdk*.json
 *.pem
 *.key
 *.keystore
@@ -68,6 +71,7 @@ MANIFEST
 # ------------------------------------------------------------
 *.manifest
 *.spec
+!/buildozer.spec
 
 # ------------------------------------------------------------
 # 6. Pip Logs
@@ -103,6 +107,7 @@ cover/
 # 9. Android and Buildozer
 # ------------------------------------------------------------
 .buildozer/
+/bin/
 .gradle/
 .gradle-cache/
 *.apk
@@ -130,6 +135,10 @@ captures/
 *.sqlite3-shm
 
 # Do not commit local business backups.
+firebase-session.bin
+profile-avatar.jpg
+accounts/
+product_photos/
 backups/
 local_data/
 user_data/
@@ -220,8 +229,9 @@ $RECYCLE.BIN/
 # 17. GrillFlow Project-Specific Files
 # ------------------------------------------------------------
 # Runtime-generated receipts and exports
-receipts/generated/
-exports/generated/
+receipts/
+reports/
+exports/
 
 # Temporary development files
 tmp/

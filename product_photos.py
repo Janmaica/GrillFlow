@@ -14,6 +14,9 @@ class PhotoPickerError(Exception):
 
 
 class DesktopPhotoPicker:
+    def __init__(self, title="Choose product photo"):
+        self.title = title
+
     def choose_photo(self):
         try:
             import tkinter
@@ -27,8 +30,8 @@ class DesktopPhotoPicker:
                 root.withdraw()
                 root.attributes("-topmost", True)
                 selected = filedialog.askopenfilename(
-                    parent=root, title="Choose product photo",
-                    filetypes=(("Product photos", "*.jpg *.jpeg *.png"),),
+                    parent=root, title=self.title,
+                    filetypes=(("Photos", "*.jpg *.jpeg *.png"),),
                 )
             finally:
                 root.destroy()
@@ -50,8 +53,8 @@ class AndroidPhotoPicker:
         raise PhotoPickerError("Android camera capture is not available yet.")
 
 
-def create_photo_picker():
-    return AndroidPhotoPicker() if platform == "android" else DesktopPhotoPicker()
+def create_photo_picker(*, title="Choose product photo"):
+    return AndroidPhotoPicker() if platform == "android" else DesktopPhotoPicker(title)
 
 
 def import_photo(source, data_dir):

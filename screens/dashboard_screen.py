@@ -113,6 +113,13 @@ ICON_PATHS = {
                .42,.63,.50,.80,.49,.97),),
     "info": ((.50,.25,.50,.55),),
     "back": ((.88,.50,.13,.50,.45,.82), (.13,.50,.45,.18)),
+    "check": ((.15,.49,.39,.25,.85,.76),),
+    "mail": ((.08,.25,.92,.25,.92,.75,.08,.75,.08,.25), (.08,.75,.50,.44,.92,.75)),
+    "lock": ((.20,.12,.80,.12,.80,.56,.20,.56,.20,.12),
+             (.32,.56,.32,.73,.41,.83,.59,.83,.68,.73,.68,.56), (.50,.39,.50,.28)),
+    "eye": ((.05,.50,.25,.70,.50,.76,.75,.70,.95,.50,.75,.30,.50,.24,.25,.30,.05,.50),),
+    "eye_off": ((.05,.50,.25,.70,.50,.76,.75,.70,.95,.50,.75,.30,.50,.24,.25,.30,.05,.50),
+                (.13,.83,.87,.17)),
     "search": ((.63,.37,.90,.10),),
     "plus": ((.20,.50,.80,.50), (.50,.20,.50,.80)),
     "camera": ((.08,.22,.92,.22,.92,.73,.68,.73,.61,.85,.39,.85,.32,.73,.08,.73,.08,.22),),
@@ -192,6 +199,8 @@ class Icon(Widget):
                     self._dot(x, y, side, cx, .50)
             elif self.name == "tag":
                 self._dot(x, y, side, .30, .67)
+            elif self.name == "eye":
+                Line(circle=(self.center_x, self.center_y, side * .13), width=dp(1))
 
     @staticmethod
     def _dot(x, y, side, cx, cy):
@@ -203,7 +212,12 @@ class Icon(Widget):
 class IconButton(ButtonBehavior, AnchorLayout):
     def __init__(self, name, color, icon_size, **kwargs):
         super().__init__(**kwargs)
-        self.add_widget(Icon(name, color, size_hint=(None, None), size=(dp(icon_size),) * 2))
+        self.icon = Icon(name, color, size_hint=(None, None), size=(dp(icon_size),) * 2)
+        self.add_widget(self.icon)
+
+    def set_icon(self, name):
+        self.icon.name = name
+        self.icon._draw()
 
 
 def paint_surface(widget, fill, radius=0, border=None, top_only=False):
@@ -625,13 +639,18 @@ class DashboardScreen(Screen):
     def _open_owner_menu(self, *_):
         sheet = BottomSheet("Menu", None)
         for text, action in (
-            ("Settings (Coming Soon)", lambda *_: self._show_sheet("Settings", "Coming Soon")),
+            ("My Profile", self._open_profile),
             ("Reset All Data", self._confirm_reset),
         ):
             button = _RoundedButton(text=text, size_hint_y=None, height=dp(44))
             button.bind(on_release=action)
             sheet.copy.add_widget(button)
         self._open_sheet(sheet)
+
+    def _open_profile(self, *_):
+        if self.sheet:
+            self.sheet.dismiss()
+        self.manager.current = "profile"
 
     def _confirm_reset(self, *_):
         sheet = BottomSheet(

@@ -4,7 +4,9 @@ from html import escape
 from uuid import uuid4
 
 
-def write_report(directory, rows, *, print_report=False):
+def write_report(directory, rows, *, print_report=False, platform=None):
+    if print_report and platform == "android":
+        return "Android report printing is not available yet."
     directory = directory / "reports"
     directory.mkdir(parents=True, exist_ok=True)
     extension = "html" if print_report else "csv"
@@ -16,6 +18,8 @@ def write_report(directory, rows, *, print_report=False):
                 "'" + value if isinstance(value, str) and value.lstrip().startswith(("=", "+", "-", "@"))
                 else value for value in row
             ) for row in rows)
+        if platform == "android":
+            return f"Report saved in GrillFlow's private storage as {output.name}."
         return f"Report exported to {output}"
 
     table = "".join("<tr>" + "".join(f"<td>{escape(str(value))}</td>" for value in row) + "</tr>" for row in rows)

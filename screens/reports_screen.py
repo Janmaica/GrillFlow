@@ -226,7 +226,7 @@ class ReportsScreen(Screen):
             rows.extend([(), ("Current Inventory", "Unit", "Stock")])
             rows.extend((product["name"], product["unit"], product["stock"]) for product in self.inventory)
         try:
-            message = write_report(self.orders.products.data_dir, rows, print_report=printer)
+            message = write_report(self.orders.products.data_dir, rows, print_report=printer, platform=platform)
         except OSError as error:
             Logger.warning("Reports: Could not write report: %s", error)
             message = "Could not generate the report. Check storage access and try again."
