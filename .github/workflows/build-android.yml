@@ -151,10 +151,19 @@ jobs:
           from firebase_auth import FIREBASE_CONFIG
 
           with ZipFile(sys.argv[1]) as apk, apk.open("assets/private.tar") as archive:
-              libraries = {name.split("/")[1] for name in apk.namelist()
+              entries = set(apk.namelist())
+              libraries = {name.split("/")[1] for name in entries
                            if name.startswith("lib/") and name.endswith(".so")}
-              if libraries != {"arm64-v8a"}:
-                  raise SystemExit(f"Expected only ARM64 native libraries. Found {sorted(libraries)}.")
+              required_abis = {"arm64-v8a", "armeabi-v7a"}
+              if libraries != required_abis:
+                  raise SystemExit(f"Expected ARM64 and ARMv7 native libraries. Found {sorted(libraries)}.")
+              required = {"libmain.so", "libpybundle.so", "libpython3.11.so", "libSDL2.so",
+                          "libsqlite3.so", "libssl.so", "libcrypto.so"}
+              for abi in sorted(required_abis):
+                  missing = [name for name in sorted(required) if f"lib/{abi}/{name}" not in entries]
+                  if missing:
+                      raise SystemExit(f"Missing {abi} runtime files: {', '.join(missing)}.")
+              print("APK contains both ARM64 and ARMv7 runtime libraries.")
               with tarfile.open(fileobj=archive, mode="r|*") as bundle:
                   for member in bundle:
                       if member.name.removeprefix("./") == FIREBASE_CONFIG.name and member.isfile():
@@ -167,7 +176,7 @@ jobs:
           echo "path=$apk" >> "$GITHUB_OUTPUT"
           {
             echo '### GrillFlow Android debug APK'
-            printf '\n- File: `%s`\n- Size: %s bytes\n- SHA-256: `%s`\n- Signing SHA-1: `%s`\n' \
+            printf '\n- File: `%s`\n- Size: %s bytes\n- SHA-256: `%s`\n- Signing SHA-1: `%s`\n- ABIs: arm64-v8a, armeabi-v7a\n' \
               "${apk##*/}" "$(stat -c %s "$apk")" "$(sha256sum "$apk" | cut -d ' ' -f 1)" "$signer_sha1"
           } >> "$GITHUB_STEP_SUMMARY"
 

@@ -185,7 +185,7 @@ under that account. This procedure is for the device operator.
 
 The build runs on GitHub-hosted Ubuntu. Your Windows development machine only
 needs a browser to download the APK. The workflow builds GrillFlow as
-`com.grillflow.app` for ARM64 phones running Android 6.0 or later, using
+`com.grillflow.app` as one APK for ARM64 and ARMv7 phones running Android 6.0 or later, using
 Android API 34, minimum API 23, NDK r28c, and python-for-android
 `v2026.05.09`. The [Buildozer spec](buildozer.spec) includes the runtime
 source, the logo and splash artwork, and the Firebase client JSON. It
@@ -215,6 +215,18 @@ toolchain error and the disk and SDK diagnostics. Builds run on new hosted
 machines and can have different debug signing keys. If Android reports an
 update signing mismatch, keep the installed app and its data while you
 resolve the signing key. Uninstalling the installed app removes its local data.
+
+If a phone reports an incompatible APK, use Windows Android SDK Platform-Tools
+with USB debugging enabled. Replace the filename with the APK you transferred.
+
+```powershell
+adb shell getprop ro.product.cpu.abilist
+adb install -r "path\to\grillflow-debug.apk"
+```
+
+`INSTALL_FAILED_NO_MATCHING_ABIS` indicates an architecture mismatch.
+`INSTALL_FAILED_UPDATE_INCOMPATIBLE` can indicate a signing-key mismatch with
+an existing installation.
 
 The Android app continues to use the [Firebase Authentication REST APIs](https://firebase.google.com/docs/reference/rest/auth).
 The bundled JSON supplies the API key and project ID for the matching Android
