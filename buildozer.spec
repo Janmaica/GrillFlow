@@ -28,6 +28,7 @@ fullscreen = 0
 # SDL2/Kivy supplies the bundled Roboto fonts. Python's SQLite and TLS use native recipes.
 requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.2,Pillow==11.3.0,pyjnius,android,sqlite3,openssl
 p4a.branch = v2026.05.09
+p4a.source_dir =
 p4a.bootstrap = sdl2
 p4a.local_recipes = android_recipes
 android.api = 34

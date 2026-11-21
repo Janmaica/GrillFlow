@@ -100,6 +100,35 @@ jobs:
           cython --version
           df -h "$GITHUB_WORKSPACE"
 
+      - name: Prepare pinned python-for-android for both ABIs
+        run: |
+          p4a_dir="$RUNNER_TEMP/grillflow-p4a"
+          p4a_tag=$(python -c 'import configparser; c = configparser.ConfigParser(); c.read("buildozer.spec"); print(c["app"]["p4a.branch"])')
+          git clone --depth 1 --branch "$p4a_tag" https://github.com/kivy/python-for-android.git "$p4a_dir"
+          # Backport https://github.com/kivy/python-for-android/pull/3360.
+          python - "$p4a_dir" <<'PY'
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1]) / "pythonforandroid" / "build.py"
+          source = path.read_text(encoding="utf-8")
+          old_venv = "shprint(host_python, '-m', 'venv', 'venv')"
+          pip_upgrade = (
+              "        info('Upgrade pip to latest version')\n"
+              "        shprint(sh.bash, '-c', (\n"
+              '            "source venv/bin/activate && pip install -U pip"\n'
+              "        ), _env=copy.copy(base_env))\n"
+          )
+          if source.count(old_venv) != 1 or source.count(pip_upgrade) != 1:
+              raise SystemExit("The p4a version changed. Review the build-venv patch.")
+          source = source.replace(old_venv, "shprint(host_python, '-m', 'venv', '--clear', 'venv')")
+          source = source.replace(pip_upgrade, "").replace(
+              "# Prepare base environment and upgrade pip:", "# Prepare base environment:"
+          )
+          path.write_text(source, encoding="utf-8")
+          PY
+          echo "APP_P4A_SOURCE_DIR=$p4a_dir" >> "$GITHUB_ENV"
+
       - name: Build signed debug APK
         env:
           APP_ANDROID_ACCEPT_SDK_LICENSE: 'True'
