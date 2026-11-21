@@ -18,7 +18,7 @@ source.include_patterns = main.py,firebase_auth.py,session_vault.py,profile_phot
     screens/report_chart.py,screens/reports_screen.py,screens/sales_screen.py,
     screens/splash_screen.py,screens/utang_screen.py,assets/images/,
     assets/images/grillflow_logo.png,assets/images/splash_background.png,google-services (3).json
-source.exclude_dirs = tests,__pycache__,backups,local_data,user_data,accounts,product_photos
+source.exclude_dirs = tests,__pycache__,backups,local_data,user_data,accounts,product_photos,android_recipes,bin
 
 icon.filename = assets/images/grillflow_logo.png
 presplash.filename = assets/images/grillflow_logo.png
@@ -29,12 +29,14 @@ fullscreen = 0
 requirements = python3==3.11.9,hostpython3==3.11.9,kivy==2.3.2,Pillow==11.3.0,pyjnius,android,sqlite3,openssl
 p4a.branch = v2026.05.09
 p4a.bootstrap = sdl2
+p4a.local_recipes = android_recipes
 android.api = 34
 android.minapi = 23
 android.ndk = 28c
 android.ndk_api = 23
 android.archs = arm64-v8a
 android.permissions = INTERNET
+android.accept_sdk_license = False
 android.allow_backup = False
 android.debug_artifact = apk
 

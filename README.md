@@ -181,38 +181,40 @@ folder, then place a copy of the verified legacy backup at
 legacy database and both backups intact. Open GrillFlow and check the records
 under that account. This procedure is for the device operator.
 
-## Android debug build from Windows
+## Building GrillFlow APK Using GitHub Actions
 
-The [Buildozer configuration](buildozer.spec) builds **GrillFlow** as
-`com.grillflow.app` for ARM64 phones running Android 6.0 or later. It uses the
-existing logo and splash background, Kivy's bundled fonts, Python 3.11.9,
-Kivy 2.3.2, the Android Pillow recipe, PyJNIus, SQLite, and OpenSSL. Its
-source allowlist includes the root `google-services (3).json` file and the app's
-runtime code and artwork. Live databases, profile and product photos,
-session files, exports, backups, and development files are outside the allowlist.
+The build runs on GitHub-hosted Ubuntu. Your Windows development machine only
+needs a browser to download the APK. The workflow builds GrillFlow as
+`com.grillflow.app` for ARM64 phones running Android 6.0 or later, using
+Android API 34, minimum API 23, NDK r28c, and python-for-android
+`v2026.05.09`. The [Buildozer spec](buildozer.spec) includes the runtime
+source, the logo and splash artwork, and the Firebase client JSON. It
+excludes local databases, photos, sessions, backups, and generated files.
 
-1. Set up Ubuntu under WSL2 and install Buildozer and its Android prerequisites
-   inside Ubuntu. Use a Linux virtual environment separate from the Windows
-   `.venv`. Follow the [Buildozer installation and WSL guide](https://buildozer.readthedocs.io/en/latest/installation/).
-2. Copy the current project sources, assets, spec, and the Firebase JSON into a
-   folder under your WSL home directory. Keep the filename, including its spaces
-   and parentheses. Run the build from that Linux folder.
+1. In the GitHub repository, open **Settings ? Secrets and variables ?
+   Actions ? New repository secret**. Name it `FIREBASE_CONFIG_JSON` and
+   paste the contents of the local `google-services (3).json` file. The
+   workflow expects Firebase project `grillflow` and Android app
+   `com.grillflow.app`. Keep the JSON in the secret and your ignored
+   local copy.
+2. Open **Actions ? Build GrillFlow Android APK ? Run workflow**, select
+   `main`, and start the run. Open the run to watch its installation,
+   Buildozer, and APK validation steps.
+3. After the run succeeds, download **GrillFlow-Android-APK** under
+   **Artifacts** and extract the ZIP. The run summary lists the APK size,
+   SHA-256 checksum, and debug signing SHA-1. Artifacts are retained for
+   14 days.
+4. Transfer the extracted APK to your phone, open it from the phone's
+   file manager, then allow that app to install unknown apps if prompted.
+   Open GrillFlow after installation.
 
-   ```sh
-   buildozer -v android debug
-   ```
-
-3. Copy the APK from `bin/` to a Windows folder. With USB debugging enabled,
-   install it using Windows Android Platform Tools.
-
-   ```powershell
-   adb devices
-   adb install -r "C:\path\to\grillflow-debug.apk"
-   ```
-
-   Use the actual filename produced by Buildozer. If Android reports a signing
-   mismatch with an existing install, stop and verify the signing key first.
-   Uninstalling the existing app removes its local data.
+If the Firebase validation step fails, check the secret name and confirm that
+the JSON is the Android client file for the registered GrillFlow app. If
+Buildozer fails, expand **Build signed debug APK** and review the first
+toolchain error and the disk and SDK diagnostics. Builds run on new hosted
+machines and can have different debug signing keys. If Android reports an
+update signing mismatch, keep the installed app and its data while you
+resolve the signing key. Uninstalling the installed app removes its local data.
 
 The Android app continues to use the [Firebase Authentication REST APIs](https://firebase.google.com/docs/reference/rest/auth).
 The bundled JSON supplies the API key and project ID for the matching Android
