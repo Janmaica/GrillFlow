@@ -117,17 +117,32 @@ jobs:
           apk="${apks[0]}"
           tools_root="$HOME/.buildozer/android/platform/android-sdk/build-tools"
           aapt=$(find "$tools_root" -type f -name aapt | sort -V | tail -n 1)
-          test -x "$aapt"
+          if [[ ! -x "$aapt" ]]; then
+            echo "::error::Could not find an executable aapt in the Android build tools."
+            exit 1
+          fi
           signer_details=$("${aapt%/*}/apksigner" verify --print-certs "$apk")
-          signer_sha1=$(sed -n 's/^Signer #1 certificate SHA-1 digest: //p' <<< "$signer_details")
-          [[ "$signer_sha1" =~ ^[0-9a-fA-F]{40}$ ]]
+          signer_sha1=$(awk -F ': ' '/certificate SHA-1 digest:/ { print $2; exit }' <<< "$signer_details")
+          if [[ ! "$signer_sha1" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            signer_sha1="Unavailable"
+          fi
           badging=$("$aapt" dump badging "$apk")
-          grep -qF "package: name='com.grillflow.app'" <<< "$badging"
-          grep -qF "application-label:'GrillFlow'" <<< "$badging"
-          grep -qF "sdkVersion:'23'" <<< "$badging"
-          grep -qF "targetSdkVersion:'34'" <<< "$badging"
-          grep -qF "native-code: 'arm64-v8a'" <<< "$badging"
-          grep -qF "uses-permission: name='android.permission.INTERNET'" <<< "$badging"
+          # Only report the public manifest fields needed for this check.
+          grep -E '^(package:|application-label:|application:|sdkVersion:|targetSdkVersion:|uses-permission:|native-code:)' <<< "$badging" || true
+          require_badging() {
+            if ! grep -qF "$1" <<< "$badging"; then
+              echo "::error::APK manifest check failed. Expected $1"
+              exit 1
+            fi
+          }
+          require_badging "package: name='com.grillflow.app'"
+          if ! grep -Eq "^(application-label:'GrillFlow'|application: label='GrillFlow')" <<< "$badging"; then
+            echo "::error::The APK application label must be GrillFlow."
+            exit 1
+          fi
+          require_badging "sdkVersion:'23'"
+          require_badging "targetSdkVersion:'34'"
+          require_badging "uses-permission: name='android.permission.INTERNET'"
           python - "$apk" <<'PY'
           import sys
           import tarfile
@@ -136,6 +151,10 @@ jobs:
           from firebase_auth import FIREBASE_CONFIG
 
           with ZipFile(sys.argv[1]) as apk, apk.open("assets/private.tar") as archive:
+              libraries = {name.split("/")[1] for name in apk.namelist()
+                           if name.startswith("lib/") and name.endswith(".so")}
+              if libraries != {"arm64-v8a"}:
+                  raise SystemExit(f"Expected only ARM64 native libraries. Found {sorted(libraries)}.")
               with tarfile.open(fileobj=archive, mode="r|*") as bundle:
                   for member in bundle:
                       if member.name.removeprefix("./") == FIREBASE_CONFIG.name and member.isfile():
